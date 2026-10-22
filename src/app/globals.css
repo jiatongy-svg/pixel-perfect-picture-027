@@ -3,23 +3,35 @@
    Components use ONLY these semantic tokens (through Tailwind classes like
    bg-surface, text-muted, bg-accent). No literal colors in component code.
 
-   Palette: Steven's "peach mint" — deep fern green on warm cream, with a
-   peach highlight for match scores. Green accent (hue 160) is far from the
-   danger hue (18), so focus rings and errors never look alike.
+   Palette: peach -> mint pastels
+     #fdd3af  #f7dbb6  #efe2bd  #e8eac5  #e1f2cd  #d8fcd5
+   The pastels are surfaces, tints and the header gradient. They are too
+   light to carry white text, so buttons and text use a deep fern green.
+   Green accent (hue 160) is far from the danger hue (28), so focus rings and
+   errors never look alike.
    =========================================================================== */
 @import "tailwindcss";
 
 :root {
   --accent-h: 160;
 
-  /* Surfaces: warm cream page, white cards. */
-  --surface: oklch(0.979 0.008 91.5);
-  --surface-raised: oklch(1 0 90);
-  --surface-sunken: oklch(0.948 0.011 95);
-  --surface-hover: oklch(0.957 0.012 95);
-  --surface-active: oklch(0.93 0.016 97);
-  --border: oklch(0.917 0.016 99);
-  --border-strong: oklch(0.868 0.019 97);
+  /* The six palette steps, peach to mint. */
+  --peach: #fdd3af;
+  --apricot: #f7dbb6;
+  --sand: #efe2bd;
+  --wheat: #e8eac5;
+  --fern: #e1f2cd;
+  --mint: #d8fcd5;
+  --brand-gradient: linear-gradient(90deg in oklch, var(--peach), var(--apricot), var(--sand), var(--wheat), var(--fern), var(--mint));
+
+  /* Surfaces: warm cream page, white cards, sand wells. */
+  --surface: #fdfbf4;
+  --surface-raised: #ffffff;
+  --surface-sunken: #f6efd9; /* a lighter step of sand, so muted text stays readable */
+  --surface-hover: #f2f8e8;
+  --surface-active: var(--wheat);
+  --border: var(--wheat);
+  --border-strong: #ddd6b0;
   --border-interactive: oklch(0.6 0.02 150); /* 3:1 control edges */
 
   --text: oklch(0.272 0.019 161);
@@ -28,12 +40,12 @@
   /* Accent: deep fern green. */
   --accent: oklch(0.382 0.043 var(--accent-h));
   --accent-hover: oklch(0.32 0.04 var(--accent-h));
-  --accent-subtle: oklch(0.939 0.052 127.5); /* fern tint */
+  --accent-subtle: var(--mint);
   --accent-text: oklch(0.382 0.043 var(--accent-h));
   --text-on-accent: oklch(1 0 90);
 
   /* Highlight: peach, for match scores and counts. Dark green text on it. */
-  --highlight: oklch(0.894 0.067 62.4);
+  --highlight: var(--peach);
   --highlight-text: oklch(0.3 0.035 160);
 
   /* Status — fixed hues, separate -text tokens for AA on tints. */
@@ -51,9 +63,9 @@
   --info-text: oklch(0.47 0.12 240);
 
   --focus-ring: oklch(0.382 0.043 var(--accent-h));
-  --focus-halo: oklch(0.894 0.067 62.4);
-  --skeleton-a: oklch(0.948 0.011 95);
-  --skeleton-b: oklch(0.917 0.016 99);
+  --focus-halo: var(--peach);
+  --skeleton-a: #f6efd9;
+  --skeleton-b: var(--wheat);
 
   --shadow-sm: 0 1px 2px oklch(0.3 0.03 155 / 0.06), 0 1px 1px oklch(0.3 0.03 155 / 0.04);
   --shadow-md: 0 1px 2px oklch(0.3 0.03 155 / 0.06), 0 8px 24px -12px oklch(0.3 0.03 155 / 0.18);
@@ -163,6 +175,9 @@ h1, h2, h3 { letter-spacing: -0.015em; line-height: 1.2; }
   border-radius: var(--radius-sm);
 }
 :focus:not(:focus-visible) { outline: none; }
+
+/* The one gradient: header bar and sign-in hero. */
+.bg-brand-gradient { background-image: var(--brand-gradient); }
 
 .skeleton {
   background: linear-gradient(90deg, var(--skeleton-a) 25%, var(--skeleton-b) 37%, var(--skeleton-a) 63%);

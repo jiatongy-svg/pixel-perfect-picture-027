@@ -15,7 +15,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-dvh pb-20 md:pb-0">
-      <header className="sticky top-0 z-10 border-b border-border bg-surface/95 backdrop-blur-sm">
+      <header className="bg-brand-gradient sticky top-0 z-10 border-b border-border">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-4 px-4 sm:px-6">
           <Link href="/" className="inline-flex items-center gap-2 rounded-sm font-bold text-accent-text">
             <Compass aria-hidden className="size-5" /> TripMatch

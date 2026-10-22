@@ -29,7 +29,7 @@ export function NavLinks({ pending, placement }: { pending: number; placement: "
                 aria-current={active(href) ? "page" : undefined}
                 className={cx(
                   "inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors duration-150",
-                  active(href) ? "bg-accent-subtle text-accent-text" : "text-muted hover:bg-surface-hover hover:text-text",
+                  active(href) ? "bg-surface-raised text-accent-text shadow-sm" : "text-text hover:bg-surface-raised/60",
                 )}
               >
                 {label}
