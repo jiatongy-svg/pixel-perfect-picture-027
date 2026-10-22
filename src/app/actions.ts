@@ -62,7 +62,11 @@ export async function sendSignInEmail(rawEmail: string): Promise<ActionResult> {
   // or its domain must be open (e.g. every @usc.edu address). Anyone else gets
   // the "private" message and no email or account is created.
   const { data: allowed, error: checkErr } = await createAdminClient().rpc("email_allowed", { p_email: parsed.data });
-  if (checkErr) return { ok: false, error: "We couldn't check your email. Please try again in a moment." };
+  if (checkErr) {
+    // Log only the error type (never the email) so it shows in Vercel -> Logs.
+    console.error("email_allowed check failed:", checkErr.code, checkErr.message);
+    return { ok: false, error: "We couldn't check your email. Please try again in a moment." };
+  }
   if (!allowed) return { ok: false, error: "PRIVATE" };
 
   const supabase = await createClient();
