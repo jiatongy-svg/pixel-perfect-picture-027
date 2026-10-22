@@ -11,12 +11,12 @@
 //   4. Return { ok: true } or a friendly error the form can show.
 // ============================================================================
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { tryAiMerge } from "@/lib/ai-merge";
 import { todayLA } from "@/lib/dates";
 import { getViewer, loadPeople, loadProposals } from "@/lib/data";
-import { publicEnv } from "@/lib/env";
 import { scoreGroup, scorePair } from "@/lib/matching";
 import { mergePlans, type MergedTrip } from "@/lib/merge";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -44,6 +44,17 @@ function friendlyDbError(message: string | undefined): string {
 // ---------------------------------------------------------------------------
 const emailSchema = z.string().trim().toLowerCase().email("Enter a valid email address").max(200);
 
+// The address this site is being visited at (localhost or the Vercel URL), so
+// nothing needs configuring. Supabase only accepts it if it's in Auth ->
+// URL Configuration -> Redirect URLs, so a faked Host header can't misuse it.
+async function siteOrigin() {
+  if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL;
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
+  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
 export async function sendSignInEmail(rawEmail: string): Promise<ActionResult> {
   const parsed = emailSchema.safeParse(rawEmail);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
@@ -53,7 +64,7 @@ export async function sendSignInEmail(rawEmail: string): Promise<ActionResult> {
     options: {
       // Never create new accounts here: only the pre-created pilot users can sign in.
       shouldCreateUser: false,
-      emailRedirectTo: `${publicEnv.siteUrl()}/auth/confirm`,
+      emailRedirectTo: `${await siteOrigin()}/auth/confirm`,
     },
   });
   if (error) {

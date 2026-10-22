@@ -72,7 +72,6 @@ You'll need about an hour, a laptop, and:
    - `NEXT_PUBLIC_SUPABASE_URL`: the Project URL
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: the anon/publishable key
    - `SUPABASE_SERVICE_ROLE_KEY`: the service_role/secret key
-   - `NEXT_PUBLIC_SITE_URL=http://localhost:3000`
    - `PILOT_ALLOWLIST`: the 6 emails, separated by commas, for example `a@usc.edu,b@usc.edu,…`
    - `ENABLE_AI_MERGE=false`
 
@@ -124,7 +123,7 @@ Every line should say `PASS`.
 
 3. Go to **vercel.com** and sign in with GitHub. Click **Add New… → Project**, then **Import** the `tripmatch` repo.
 4. Before clicking Deploy, open **Environment Variables** and add every variable from your `.env.local` **except** `PILOT_ALLOWLIST`. Vercel doesn't need that one.
-   - Set `NEXT_PUBLIC_SITE_URL` to `https://tripmatch-xxxx.vercel.app`. If you don't know the URL yet, deploy once, copy it, update this variable, and redeploy.
+   - If the code lives on a branch (for example `tripmatch-nextjs`), go to **Settings → Environments → Production → Branch Tracking** after importing, set it to that branch, and redeploy.
 5. Click **Deploy**.
 6. Go back to Supabase → **Authentication → URL Configuration**:
    - Change **Site URL** to your `https://…vercel.app` URL.
