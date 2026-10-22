@@ -195,8 +195,28 @@ describe("proposals", () => {
   });
 
   it("pilot_stats counts joined students without exposing emails", async () => {
-    expect(await as("ana", "select * from public.pilot_stats()")).toEqual([{ total: 3, joined: 3 }]);
+    expect(await as("ana", "select * from public.pilot_stats()")).toEqual([{ total: 3, joined: 3, open: false }]);
     expect(await as("outsider", "select * from public.pilot_stats()")).toHaveLength(0);
+  });
+
+  it("opening a domain lets every address on it in; closing it locks them out again", async () => {
+    await db.exec(`insert into auth.users values ('00000000-0000-4000-8000-0000000000dd', 'dana@usc.edu');`);
+    expect(await as("outsider", "select public.is_allowlisted() as ok")).toEqual([{ ok: false }]);
+    await db.exec("insert into public.allowed_domains values ('usc.edu')");
+    const dana = "00000000-0000-4000-8000-0000000000dd";
+    await db.exec(`reset role; select set_config('request.jwt.claim.sub', '${dana}', false); set role authenticated;`);
+    expect((await db.query<{ ok: boolean }>("select public.is_allowlisted() as ok")).rows[0].ok).toBe(true);
+    expect((await db.query("select display_name from public.profiles")).rows.length).toBe(3);
+    await db.exec("reset role; select set_config('request.jwt.claim.sub', '', false);");
+    expect(await as("outsider", "select public.is_allowlisted() as ok")).toEqual([{ ok: false }]); // gmail still out
+    expect(await as("ana", "select open from public.pilot_stats()")).toEqual([{ open: true }]);
+    await db.exec("delete from public.allowed_domains");
+  });
+
+  it("users can't call email_allowed or read allowed_domains", async () => {
+    await expect(as("ana", "select public.email_allowed('x@usc.edu')")).rejects.toThrow(/permission denied/);
+    await expect(as("ana", "select * from public.allowed_domains")).rejects.toThrow(/permission denied/);
+    expect(await as<{ ok: boolean }>("service", "select public.email_allowed('X@USC.EDU') as ok")).toEqual([{ ok: false }]);
   });
 
   it("the signed-out role gets nothing", async () => {

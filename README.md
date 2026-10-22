@@ -20,7 +20,8 @@ Phone/laptop ──HTTPS──> Next.js on Vercel ──> Supabase (sign-in + Po
                             are plain code (no AI)
 ```
 
-- **Sign-in:** the student types their email and gets a one-time code (or link). Public sign-up is off, so only the 6 accounts made by `npm run seed` exist. The database also checks the allowlist on every read and write.
+- **Sign-in:** the student types their email and gets a one-time code (or link). Who may sign in is decided in the database: individual emails in `allowed_emails`, plus whole domains in `allowed_domains` (currently `usc.edu`, so any USC student can join). The server checks this *before* sending a code, and RLS checks it again on every read and write.
+- **Access modes:** to go back to a closed pilot, run `delete from public.allowed_domains where domain = 'usc.edu';` and turn off "Allow new users to sign up" in Supabase. To reopen, run `supabase/migrations/002_open_to_usc.sql` again.
 - **Who sees what:** you can read and edit only your own profile and plan. Classmates see your profile and the matching-relevant parts of your plan through the `plan_cards` view. They never see your email or your private notes. Only a proposal's members can see that proposal.
 - **No stale data:** every page is rendered fresh (`force-dynamic`), so matches always use the latest saved plans.
 
@@ -88,6 +89,8 @@ npm run rls-check  # security checks against the real Supabase project
 - `superseded` exists as a proposal status but isn't used yet.
 
 ## Changelog
+
+- **2026-10-22** Opened sign-in to every @usc.edu address (`allowed_domains` + `email_allowed()`, migration `002_open_to_usc.sql`). Email links are now scanner-safe (USC Outlook pre-opens links), and the 6-digit code is the main sign-in path. Email is sent through Brevo SMTP.
 
 - **2026-10-21** First real build (replaces the Lovable prototype, which had no real sign-in or shared data):
   - Next.js and Supabase, with verified email sign-in and an allowlist enforced in the database.

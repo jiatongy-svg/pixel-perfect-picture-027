@@ -58,12 +58,19 @@ async function siteOrigin() {
 export async function sendSignInEmail(rawEmail: string): Promise<ActionResult> {
   const parsed = emailSchema.safeParse(rawEmail);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  // Check access BEFORE sending anything: the email must be on the allowlist,
+  // or its domain must be open (e.g. every @usc.edu address). Anyone else gets
+  // the "private" message and no email or account is created.
+  const { data: allowed, error: checkErr } = await createAdminClient().rpc("email_allowed", { p_email: parsed.data });
+  if (checkErr) return { ok: false, error: "We couldn't check your email. Please try again in a moment." };
+  if (!allowed) return { ok: false, error: "PRIVATE" };
+
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithOtp({
     email: parsed.data,
     options: {
-      // Never create new accounts here: only the pre-created pilot users can sign in.
-      shouldCreateUser: false,
+      // Allowed emails get an account on first sign-in (Supabase sign-ups must be ON).
+      shouldCreateUser: true,
       emailRedirectTo: `${await siteOrigin()}/auth/confirm`,
     },
   });

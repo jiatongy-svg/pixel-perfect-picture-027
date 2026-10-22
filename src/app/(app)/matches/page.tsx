@@ -41,7 +41,7 @@ export default async function MatchesPage({ searchParams }: { searchParams: Prom
   const header = (
     <PageHeader
       title="Matches"
-      subtitle={`${stats.joined} of ${stats.total} pilot classmates have joined`}
+      subtitle={stats.open ? `${stats.joined} ${stats.joined === 1 ? "classmate has" : "classmates have"} joined so far` : `${stats.joined} of ${stats.total} pilot classmates have joined`}
       action={<RefreshButton />}
     />
   );
@@ -63,7 +63,7 @@ export default async function MatchesPage({ searchParams }: { searchParams: Prom
     return (
       <>
         {header}
-        <EmptyState icon={<Hourglass />} title={`Waiting on classmates — ${stats.joined} of ${stats.total} have joined`}>
+        <EmptyState icon={<Hourglass />} title={stats.open ? "Waiting on classmates — you're the first one here" : `Waiting on classmates — ${stats.joined} of ${stats.total} have joined`}>
           Your plan is saved. Matches appear here as soon as another pilot classmate saves theirs. Nothing to do but check back.
         </EmptyState>
       </>

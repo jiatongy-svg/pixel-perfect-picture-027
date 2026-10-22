@@ -58,10 +58,9 @@ export function SignInForm({ initialError }: { initialError?: string }) {
     return (
       <div className="flex flex-col gap-4">
         <Lock aria-hidden className="size-7 text-muted" />
-        <h2 className="text-xl font-semibold">This pilot is private</h2>
+        <h2 className="text-xl font-semibold">Sign in with your USC email</h2>
         <p className="text-muted">
-          TripMatch is being tested with a small group of MSBA students right now, and this email isn't part of it. If you think that's a
-          mistake, ask the pilot organizer which email they added for you.
+          TripMatch is for USC students right now, so it only accepts @usc.edu email addresses. Try again with your USC email.
         </p>
         <Button variant="secondary" onClick={() => { setStep("email"); setError(null); }}>Try a different email</Button>
       </div>
@@ -102,11 +101,11 @@ export function SignInForm({ initialError }: { initialError?: string }) {
     <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); send(); }}>
       <div>
         <h2 className="text-xl font-semibold">Sign in</h2>
-        <p className="mt-1 text-muted">Use the email the pilot organizer added for you. No password needed.</p>
+        <p className="mt-1 text-muted">Use your @usc.edu email. No password needed — we&apos;ll email you a code.</p>
       </div>
       {error && <Notice tone="error">{error}</Notice>}
       <Field id="email" label="Email">
-        <input id="email" type="email" autoComplete="email" required className={inputClass} placeholder="tommy@usc.edu" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input id="email" type="email" autoComplete="email" required className={inputClass} placeholder="ttrojan@usc.edu" value={email} onChange={(e) => setEmail(e.target.value)} />
       </Field>
       <Button type="submit" loading={pending} disabled={!email.includes("@")}>Email me a code</Button>
     </form>

@@ -87,8 +87,8 @@ export async function photoUrls(supabase: Supabase, paths: (string | null)[]): P
 
 export async function pilotStats(supabase: Supabase) {
   const { data } = await supabase.rpc("pilot_stats");
-  const row = (data as { total: number; joined: number }[] | null)?.[0];
-  return row ?? { total: 0, joined: 0 };
+  const row = (data as { total: number; joined: number; open: boolean }[] | null)?.[0];
+  return row ?? { total: 0, joined: 0, open: false };
 }
 
 // ---------------------------------------------------------------------------

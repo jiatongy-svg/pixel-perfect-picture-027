@@ -9,7 +9,8 @@
 -- Big ideas, in plain English:
 --   * Every table has Row Level Security (RLS) turned on. With RLS on, the
 --     database refuses every read/write unless a "policy" below allows it.
---   * Only people whose email is in `allowed_emails` can see anything.
+--   * Only people whose email is in `allowed_emails`, or whose email domain is
+--     in `allowed_domains` (e.g. usc.edu), can see anything.
 --   * You can only change YOUR profile and YOUR plan.
 --   * Proposals can only be read by their members, and can only be changed
 --     through the functions at the bottom (create / counter / accept /
@@ -37,20 +38,35 @@ create table public.allowed_emails (
 alter table public.allowed_emails enable row level security;
 revoke all on public.allowed_emails from anon, authenticated;
 
--- Is the signed-in user on the allowlist? We look up their email from the
--- auth system by user id (not from anything the browser sends).
+-- Whole email domains that may sign in, e.g. 'usc.edu' opens the app to every
+-- USC address. Empty = only the individual emails in allowed_emails.
+create table public.allowed_domains (
+  domain text primary key check (domain = lower(domain) and domain not like '%@%'),
+  created_at timestamptz not null default now()
+);
+alter table public.allowed_domains enable row level security;
+revoke all on public.allowed_domains from anon, authenticated;
+
+-- Is this email allowed in? (listed individually, or its domain is open)
 -- "security definer" = runs with the table owner's rights so it can read the
--- allowlist, while the caller still can't.
+-- allowlist tables, while callers still can't read them directly.
+create function public.email_allowed(p_email text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (select 1 from public.allowed_emails where email = lower(p_email))
+      or exists (select 1 from public.allowed_domains where domain = lower(split_part(p_email, '@', 2)));
+$$;
+revoke execute on function public.email_allowed(text) from public, anon, authenticated;
+grant execute on function public.email_allowed(text) to service_role;
+
+-- Is the signed-in user allowed? We look up their email from the auth
+-- system by user id (not from anything the browser sends).
 create function public.is_allowlisted()
 returns boolean
 language sql stable security definer set search_path = ''
 as $$
-  select exists (
-    select 1
-    from auth.users u
-    join public.allowed_emails a on a.email = lower(u.email)
-    where u.id = auth.uid()
-  );
+  select coalesce((select public.email_allowed(u.email) from auth.users u where u.id = auth.uid()), false);
 $$;
 grant execute on function public.is_allowlisted() to authenticated;
 
@@ -301,9 +317,8 @@ begin
   select count(*) into v_ok
   from public.profiles p
   join auth.users u on u.id = p.id
-  join public.allowed_emails a on a.email = lower(u.email)
   join public.travel_plans t on t.user_id = p.id
-  where p.id = any (v_members) and p.completed;
+  where p.id = any (v_members) and p.completed and public.email_allowed(u.email);
   if v_ok <> cardinality(v_members) then
     raise exception 'NOT_ALLOWED: every member needs a completed profile and a saved plan';
   end if;
@@ -424,16 +439,17 @@ $$;
 grant execute on function public.decline_proposal(uuid, int) to authenticated;
 
 -- "X of 6 have joined" for the empty state, without revealing anyone's email.
+-- open = true when a whole domain is allowed (then there's no fixed total).
 create function public.pilot_stats()
-returns table (total int, joined int)
+returns table (total int, joined int, open boolean)
 language sql stable security definer set search_path = ''
 as $$
   select
     (select count(*)::int from public.allowed_emails),
     (select count(*)::int from public.profiles p
        join auth.users u on u.id = p.id
-       join public.allowed_emails a on a.email = lower(u.email)
-     where p.completed)
+     where p.completed and public.email_allowed(u.email)),
+    exists (select 1 from public.allowed_domains)
   where public.is_allowlisted();
 $$;
 grant execute on function public.pilot_stats() to authenticated;
