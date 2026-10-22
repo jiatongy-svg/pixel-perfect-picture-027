@@ -1,5 +1,16 @@
-import { MbtiPicker, GroupPersonality } from "@/components/trip/Personality";
-import { TravelerChat } from "@/components/trip/TravelerChat";
+import { upcomingWeekends } from "@/lib/weekends";
+import { ProfileEditor } from "@/components/trip/ProfileEditor";
+import { PlanGallery } from "@/components/trip/PlanGallery";
+import { MyPlans } from "@/components/trip/MyPlans";
+import { BudgetFields } from "@/components/trip/BudgetFields";
+import { DestinationPicker } from "@/components/trip/DestinationPicker";
+import { DestinationImage } from "@/components/trip/DestinationImage";
+import { QuestionScreen } from "@/components/trip/QuestionScreen";
+import { DEFAULT_DETAILS, detailsSchema, moneyValue, TRIP_ITEMS, type TravelerDetails } from "@/lib/traveler";
+import { anonymousProfile, sampleProfiles } from "@/lib/public-plans";
+import { mergeRules, rankMatches, buildItinerary } from "@/lib/matching";
+import { clearLocalTraveler, saveDemoTrip } from "@/lib/local-demo";
+import { GroupPersonality } from "@/components/trip/Personality";
 import { isMbti, type Mbti } from "@/lib/personality";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -9,7 +20,7 @@ import { SignInScreen } from "@/components/trip/SignInScreen";
 import { isUscEmail, uscSsoEnabled } from "@/lib/sign-in";
 import { supabase } from "@/integrations/supabase/client";
 import type { Match } from "@/lib/matching";
-import { decide, getMatches, proposeMerge, saveProfile } from "@/lib/trip.functions";
+import { decide, getMatches, proposeMerge, saveProfile, clearProfileSession } from "@/lib/trip.functions";
 import {
   BREAKS, BUDGETS, DESTINATIONS, VIBES, findDestination,
   type BreakId, type Budget, type Gear, type MergedPlan, type TripProfile, type Vibe,
@@ -29,7 +40,7 @@ export const Route = createFileRoute("/")({
   component: App,
 });
 
-type Step = "signin" | "entry" | 1 | 2 | 3 | 4 | 5 | "matches" | "merge";
+type Step = "signin" | "entry" | "profile" | "browse" | "saved" | 1 | 2 | 3 | 4 | 5 | "matches" | "merge";
 type Proposal = { proposalId: string; merged: MergedPlan; source: string; me: TripProfile; them: TripProfile };
 
 const fmt = (s: string) => new Date(s + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -45,8 +56,18 @@ function App() {
   const [step, setStep] = useState<Step>("signin");
   const [email, setEmail] = useState("");
   const [mbti, setMbti] = useState<Mbti | null>(null);
+  const [details, setDetails] = useState<TravelerDetails>({ ...DEFAULT_DETAILS });
+  const [budgetMin, setBudgetMin] = useState("");
+  const [budgetMax, setBudgetMax] = useState("");
+  const [savedProfile, setSavedProfile] = useState<(TripProfile & { localOnly?: boolean }) | null>(null);
+  const [pendingJoin, setPendingJoin] = useState<string | null>(null);
+  const [matching, setMatching] = useState(false);
+  const clearSession = useServerFn(clearProfileSession);
   const [mbtiNotice, setMbtiNotice] = useState(false);
   const [mode, setMode] = useState<"go" | "plan">("go");
+  const [weekends] = useState(() => upcomingWeekends());
+  const [weekendStart, setWeekendStart] = useState(() => upcomingWeekends()[0]!.start);
+  const weekendEnd = weekends.find((weekend) => weekend.start === weekendStart)!.end;
   const [breakId, setBreakId] = useState<BreakId | null>(null);
   const [vibes, setVibes] = useState<Vibe[]>([]);
   const [dests, setDests] = useState<string[]>([]);
@@ -61,6 +82,12 @@ function App() {
 
   const [restoring, setRestoring] = useState(uscSsoEnabled);
   useEffect(() => {
+    try {
+      const savedDetails = JSON.parse(localStorage.getItem("tm_details") ?? "null");
+      if (savedDetails) setDetails(detailsSchema.parse(savedDetails));
+      const saved = JSON.parse(localStorage.getItem("tm_saved_profile") ?? "null");
+      if (saved?.id && saved.email === localStorage.getItem("tm_email")) { setSavedProfile(saved); setProfileId(saved.id); }
+    } catch { /* Ignore incomplete drafts from an earlier app version. */ }
     const savedMbti = localStorage.getItem("tm_mbti");
     if (isMbti(savedMbti)) setMbti(savedMbti);
     // A stored email alone never counts as an authenticated SSO session.
@@ -112,8 +139,8 @@ function App() {
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
       }
-      localStorage.removeItem("tm_email");
-      localStorage.removeItem("tm_mbti"); setMbti(null);
+      await clearSession();
+      clearLocalTraveler(); setDetails({ ...DEFAULT_DETAILS }); setSavedProfile(null); setMbti(null);
       setEmail(""); setProfileId(null); setMatches([]); setProposal(null); setStep("signin");
     });
   }
@@ -131,30 +158,43 @@ function App() {
   }
 
   async function finishOnboarding(g: Gear[]) {
+    const low = moneyValue(budgetMin), high = moneyValue(budgetMax);
+    if (low === null || high === null || high < low) { setErr("Enter a valid budget range."); return; }
     setGear(g);
     await run(async () => {
       const b = breakId!;
-      let start: string, end: string, destinations: string[];
-      if (mode === "plan") {
-        start = custom.start; end = custom.end || custom.start; destinations = [custom.destination.trim()];
+      const top = findDestination(b, dests[0] ?? "");
+      const start = mode === "plan" ? custom.start : b === "weekend" ? weekendStart : top?.start ?? BREAKS.find((item) => item.id === b)!.start;
+      const end = mode === "plan" ? custom.end || custom.start : b === "weekend" ? weekendEnd : top?.end ?? BREAKS.find((item) => item.id === b)!.end;
+      const updatedDetails = { ...details, trip_tags: details.trip_tags.filter((item) => item !== "Car" && item !== "Tent" || item === "Car" && g.includes("car") || item === "Tent" && g.includes("tent")), budget_min: low, budget_max: high };
+      const input = { email, mbti, details: updatedDetails, first_name: firstName, msba_year: details.year, break_id: b, vibes, destinations: dests, start_date: start, end_date: end, budget: budget!, gear: g };
+      const p = await save({ data: input });
+      const own = { ...input, ...p, details: updatedDetails } as TripProfile & { localOnly: boolean };
+      localStorage.setItem("tm_saved_profile", JSON.stringify(own));
+      localStorage.setItem("tm_details", JSON.stringify(updatedDetails));
+      setSavedProfile(own); setProfileId(p.id); setMbtiNotice(!p.detailsPersisted);
+      setMatches([]); setStep("matches");
+      if (own.localOnly) {
+        setMatches(rankMatches(own, sampleProfiles).map((match) => ({ ...match, profile: anonymousProfile(match.profile) })));
       } else {
-        const top = findDestination(b, dests[0] ?? "")!;
-        start = top.start; end = top.end; destinations = dests;
+        setMatching(true);
+        void fetchMatches({ data: { profileId: p.id, mbti } }).then((result) => setMatches(result.matches)).catch(() => setErr("Your plan was saved, but matches could not load. You can browse all trips or retry.")).finally(() => setMatching(false));
       }
-      const p = await save({ data: { email, mbti, first_name: firstName, msba_year: "MSBA 2027", break_id: b, vibes, destinations, start_date: start, end_date: end, budget: budget!, gear: g } });
-      setProfileId(p.id);
-      setMbtiNotice(!p.mbtiPersisted && !!mbti);
-      const r = await fetchMatches({ data: { profileId: p.id, mbti } });
-      setMatches(r.matches);
-      setStep("matches");
+      if (pendingJoin) { const target = pendingJoin; setPendingJoin(null); await openMatch(target, undefined, own); }
     });
   }
 
-  async function openMatch(id: string, override?: { destination?: string; start_date?: string; end_date?: string }) {
+  async function openMatch(id: string, override?: { destination?: string; start_date?: string; end_date?: string }, own = savedProfile) {
+    if (!own) { setPendingJoin(id); setStep("profile"); return; }
     await run(async () => {
-      const r = await propose({ data: { profileId: profileId!, matchId: id, override } });
-      const result = r as Proposal;
-      setProposal({ ...result, me: { ...result.me, mbti } });
+      if (own.localOnly) {
+        const target = sampleProfiles.find((profile) => profile.id === id);
+        if (!target) throw new Error("That local sample plan is no longer available.");
+        setProposal({ proposalId: crypto.randomUUID(), merged: mergeRules(own, target, override), source: "demo", me: own, them: anonymousProfile(target) });
+      } else {
+        const result = await propose({ data: { profileId: own.id, matchId: id, override } });
+        setProposal({ ...result, me: { ...result.me, mbti, details: own.details } } as Proposal);
+      }
       setStep("merge");
     });
   }
@@ -169,79 +209,57 @@ function App() {
       }} />;
   }
 
-  if (step === "entry") {
-    return (
-      <Screen>
-        <h1 className="text-3xl font-extrabold">Hi {firstName} 👋</h1>
-        <p className="mt-2 text-muted-foreground">Where are you starting from?</p>
-        <MbtiPicker value={mbti} onChange={(value) => {
-          setMbti(value);
-          if (value) localStorage.setItem("tm_mbti", value); else localStorage.removeItem("tm_mbti");
-        }} />
-        <div className="mt-8 space-y-3">
-          <Option onClick={() => { setMode("go"); setStep(1); }}>
-            <div className="text-lg font-bold">I want to go somewhere</div>
-            <div className="text-sm text-muted-foreground">Pick from popular trips for your break</div>
-          </Option>
-          <Option onClick={() => { setMode("plan"); setStep(1); }}>
-            <div className="text-lg font-bold">I already have a plan</div>
-            <div className="text-sm text-muted-foreground">Enter your destination and dates</div>
-          </Option>
-        </div>
-        <button className="mt-auto pt-10 text-sm text-muted-foreground underline" disabled={busy} onClick={signOut}>
-          Not {email}? Sign out
-        </button>
-        {err && <p role="alert" className="mt-3 text-sm text-destructive">{err}</p>}
-      </Screen>
-    );
-  }
+  if (step === "profile") return <Screen><button className="mb-5 self-start text-sm text-primary underline" onClick={() => setStep("entry")}>← Home</button><ProfileEditor details={details} onChange={setDetails} mbti={mbti} onMbti={setMbti} onDone={() => {
+    localStorage.setItem("tm_details", JSON.stringify(details));
+    if (mbti) localStorage.setItem("tm_mbti", mbti); else localStorage.removeItem("tm_mbti");
+    setStep(pendingJoin ? 1 : "entry");
+  }} /></Screen>;
+  if (step === "browse") return <Screen><button className="mb-4 self-start text-sm text-primary underline" onClick={() => setStep("entry")}>← Home</button><PlanGallery viewer={savedProfile ?? undefined} onJoin={(id) => void openMatch(id)} />{busy && <p role="status">Opening plan…</p>}{err && <p role="alert" className="mt-3 text-sm text-destructive">{err}</p>}</Screen>;
+  if (step === "saved") return <Screen><button className="mb-4 self-start text-sm text-primary underline" onClick={() => setStep("entry")}>← Home</button><MyPlans profile={savedProfile} /></Screen>;
+  if (step === "entry") return <Screen>
+    <h1 className="text-3xl font-extrabold">Hi {firstName}</h1><p className="mt-2 text-muted-foreground">Where are you starting from?</p>
+    <div className="mt-5 flex flex-wrap gap-3"><button onClick={() => setStep("profile")} className="rounded-xl border border-border bg-card px-4 py-3 text-sm font-semibold">Profile · {details.year}{mbti ? ` · ${mbti}` : ""}</button><button onClick={() => setStep("saved")} className="rounded-xl border border-border bg-card px-4 py-3 text-sm font-semibold">My plans & invitations</button></div>
+    <div className="mt-6 space-y-3"><Option onClick={() => { setMode("go"); setStep(1); }}><div className="text-lg font-bold">I want to go somewhere</div><div className="text-sm text-muted-foreground">Pick from popular trips for your break</div></Option><Option onClick={() => { setMode("plan"); setStep(1); }}><div className="text-lg font-bold">I already have a plan</div><div className="text-sm text-muted-foreground">Type destinations and check them on Google Maps</div></Option><Option onClick={() => setStep("browse")}><div className="text-lg font-bold">Explore all trips</div><div className="text-sm text-muted-foreground">Browse anonymously, with or without a saved plan</div></Option></div>
+    <button className="mt-auto pt-8 text-sm text-muted-foreground underline" disabled={busy} onClick={signOut}>Not {email}? Sign out</button>{err && <p role="alert" className="mt-3 text-sm text-destructive">{err}</p>}
+  </Screen>;
 
   if (typeof step === "number") {
     const back = () => setStep(step === 1 ? "entry" : ((step - 1) as Step));
-    const Q = ({ title, children, next, canNext }: { title: string; children: React.ReactNode; next?: () => void; canNext?: boolean }) => (
-      <Screen step={`${step} of ${total}`} assistantContext={JSON.stringify({ destinations: mode === "plan" ? custom.destination : dests, dates: custom, budget, vibes, mbti })}>
-        <div className="mb-6 h-1.5 w-full rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${(step / total) * 100}%` }} /></div>
-        <button onClick={back} className="mb-3 self-start text-sm font-semibold text-muted-foreground">← Back</button>
-        <h2 className="mb-6 text-2xl font-extrabold">{title}</h2>
-        <div className="space-y-3">{children}</div>
-        {next && <div className="mt-auto pt-8"><PrimaryButton disabled={!canNext || busy} onClick={next}>{busy ? "Finding matches…" : "Next"}</PrimaryButton></div>}
-        {err && <p className="mt-3 text-sm text-destructive">{err}</p>}
-      </Screen>
-    );
-
     if (step === 1)
       return (
-        <Q title="Which break?">
+        <QuestionScreen step={step} total={total} busy={busy} error={err} onBack={back} context={JSON.stringify({ destinations: dests, budget, vibes, mbti })} title="Which break?" next={breakId === "weekend" ? () => setStep(2) : undefined} canNext={!!weekendStart}>
           {BREAKS.map((b) => (
-            <Option key={b.id} selected={breakId === b.id} onClick={() => { if (b.id !== breakId) setDests([]); setBreakId(b.id); setStep(2); }}>
-              <div className="font-bold">{b.label}</div>
-              <div className="text-sm text-muted-foreground">{range(b.start, b.end)}</div>
+            <Option key={b.id} selected={breakId === b.id} onClick={() => { if (b.id !== breakId) setDests([]); setBreakId(b.id); if (b.id !== "weekend") setStep(2); }}>
+              <div className="font-bold">{b.id === "weekend" ? "A weekend" : b.label}</div>
+              <div className="text-sm text-muted-foreground">{b.id === "weekend" ? `This weekend ${range(weekends[0]!.start, weekends[0]!.end)} · more dates` : range(b.start, b.end)}</div>
             </Option>
           ))}
-        </Q>
+          {breakId === "weekend" && <label className="mt-4 block text-sm font-semibold">Choose a weekend<select value={weekendStart} onChange={(event) => setWeekendStart(event.target.value)} className="mt-2 h-14 w-full rounded-xl border border-border bg-card px-3">{weekends.map((weekend, index) => <option key={weekend.start} value={weekend.start}>{index === 0 ? "This weekend · " : ""}{range(weekend.start, weekend.end)}</option>)}</select><span className="mt-2 block font-normal text-muted-foreground">One weekend per plan. For other dates, use “I already have a plan.”</span></label>}
+        </QuestionScreen>
       );
 
     if (step === 2)
       return (
-        <Q title="What's your vibe? (up to 2)" next={() => setStep(3)} canNext={vibes.length > 0}>
+        <QuestionScreen step={step} total={total} busy={busy} error={err} onBack={back} context={JSON.stringify({ destinations: dests, budget, vibes, mbti })} title="What's your vibe? (up to 2)" next={() => setStep(3)} canNext={vibes.length > 0}>
           <div className="grid grid-cols-2 gap-3">
             {VIBES.map((v) => {
               const on = vibes.includes(v);
               return (
                 <Option key={v} selected={on} onClick={() => setVibes(on ? vibes.filter((x) => x !== v) : vibes.length < 2 ? [...vibes, v] : [vibes[1]!, v])}>
-                  <div className="py-2 text-center font-bold">{v}</div>
+                  <div className="py-2 text-center"><div className="font-bold">{v}</div><p className="mt-1 text-xs text-muted-foreground">{{ Adventure: "Hikes and outdoor activities", Artsy: "Museums, design and local culture", Touristy: "Landmarks and classic sights", Relaxed: "Slow days with room to unwind" }[v]}</p></div>
                 </Option>
               );
             })}
           </div>
-        </Q>
+        </QuestionScreen>
       );
 
     if (step === 3 && mode === "go") {
       const list = DESTINATIONS[breakId!];
       return (
-        <Q title="Pick & rank up to 3" next={() => setStep(4)} canNext={dests.length > 0}>
+        <QuestionScreen step={step} total={total} busy={busy} error={err} onBack={back} context={JSON.stringify({ destinations: dests, budget, vibes, mbti })} title="Pick & rank up to 3" next={() => setStep(4)} canNext={dests.length > 0}>
           <p className="-mt-3 text-sm text-muted-foreground">Tap in order of preference.</p>
+          {dests[0] && <DestinationImage destination={dests[0]} />}
           {list.map((dst) => {
             const rank = dests.indexOf(dst.name);
             return (
@@ -253,62 +271,49 @@ function App() {
               >
                 <div className="font-bold">{dst.name}</div>
                 <div className="mt-0.5 text-sm text-muted-foreground">
-                  ${dst.min}–{dst.max.toLocaleString()} pp · {dst.car ? "🚗 Car needed" : "No car needed"} · {range(dst.start, dst.end)}
+                  ${dst.min}–{dst.max.toLocaleString()} pp · {dst.car ? "🚗 Car needed" : "No car needed"} · {breakId === "weekend" ? range(weekendStart, weekendEnd) : range(dst.start, dst.end)}
                 </div>
               </Option>
             );
           })}
-        </Q>
+        </QuestionScreen>
       );
     }
 
-    if (step === 3)
-      return (
-        <Q title="Your plan" next={() => setStep(4)} canNext={!!custom.destination.trim() && !!custom.start && (!custom.end || custom.end >= custom.start)}>
-          <input placeholder="Destination (e.g. Joshua Tree)" value={custom.destination} onChange={(e) => setCustom({ ...custom, destination: e.target.value })}
-            list="preset-dests" className="h-14 w-full rounded-2xl border-2 border-border bg-card px-4 outline-none focus:border-primary" />
-          <datalist id="preset-dests">{DESTINATIONS[breakId!].map((x) => <option key={x.name} value={x.name} />)}</datalist>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="text-sm font-semibold">Start<input type="date" value={custom.start} onChange={(e) => setCustom({ ...custom, start: e.target.value })} className="mt-1 h-14 w-full rounded-2xl border-2 border-border bg-card px-3" /></label>
-            <label className="text-sm font-semibold">End<input type="date" value={custom.end} onChange={(e) => setCustom({ ...custom, end: e.target.value })} className="mt-1 h-14 w-full rounded-2xl border-2 border-border bg-card px-3" /></label>
-          </div>
-        </Q>
-      );
-
-    if (step === 4)
-      return (
-        <Q title="Budget per person?">
-          {BUDGETS.map((b) => (
-            <Option key={b.id} selected={budget === b.id} onClick={() => { setBudget(b.id); setStep(5); }}>
-              <div className="font-bold">{b.label}</div>
-            </Option>
-          ))}
-        </Q>
-      );
-
-    return (
-      <Q title="Bringing a car or gear?">
-        {([["car"], ["tent"], ["car", "tent"], []] as Gear[][]).map((g) => (
-          <Option key={g.join() || "none"} selected={gear?.join() === g.join()} onClick={() => !busy && finishOnboarding(g)}>
-            <div className="font-bold">{g.length === 0 ? "None" : g.map((x) => (x === "car" ? "🚗 Car" : "⛺ Tent")).join(" + ")}</div>
-          </Option>
-        ))}
-        {busy && <p className="pt-2 text-center text-sm font-semibold text-primary">Finding your matches…</p>}
-      </Q>
-    );
+    if (step === 3) return <QuestionScreen step={step} total={total} busy={busy} error={err} onBack={back} context="Custom trip" title="Your plan" next={() => setStep(4)} canNext={dests.length > 0 && !!custom.start && (!custom.end || custom.end >= custom.start)}>
+      <DestinationPicker values={dests} onChange={setDests} />
+      {dests[0] && <DestinationImage destination={dests[0]} />}
+      <div className="grid grid-cols-2 gap-3"><label className="text-sm font-semibold">Start<input type="date" value={custom.start} onInput={(event) => { const value = event.currentTarget.value; setCustom((draft) => ({ ...draft, start: value })); }} onChange={(event) => setCustom((draft) => ({ ...draft, start: event.target.value }))} className="mt-1 h-14 w-full rounded-xl border-2 border-border bg-card px-2" /></label><label className="text-sm font-semibold">End<input type="date" value={custom.end} min={custom.start} onInput={(event) => { const value = event.currentTarget.value; setCustom((draft) => ({ ...draft, end: value })); }} onChange={(event) => setCustom((draft) => ({ ...draft, end: event.target.value }))} className="mt-1 h-14 w-full rounded-xl border-2 border-border bg-card px-2" /></label></div>
+    </QuestionScreen>;
+    if (step === 4) return <QuestionScreen step={step} total={total} busy={busy} error={err} onBack={back} context="Trip budget" title="Budget per person" next={() => { const max = moneyValue(budgetMax)!; setBudget(max <= 300 ? "under300" : max <= 700 ? "300-700" : "700plus"); setStep(5); }} canNext={moneyValue(budgetMin) !== null && moneyValue(budgetMax) !== null && Number(budgetMax) >= Number(budgetMin)}>
+      <BudgetFields min={budgetMin} max={budgetMax} onMin={setBudgetMin} onMax={setBudgetMax} />
+    </QuestionScreen>;
+    const outdoors = dests.some((place) => /joshua|yosemite|zion|bryce|mammoth|big bear|grand canyon|sedona/i.test(place));
+    const items = TRIP_ITEMS.filter((item) => !["Car", "Tent"].includes(item) || outdoors);
+    return <QuestionScreen step={step} total={total} busy={busy} error={err} onBack={back} context={JSON.stringify({ destinations: dests })} title="What can you bring?">
+      <p className="text-sm text-muted-foreground">Optional. Pick items you can share on this trip.</p>
+      <div className="flex flex-wrap gap-2">{items.map((item) => { const selected = details.trip_tags.includes(item); return <button type="button" aria-pressed={selected} key={item} disabled={busy} onClick={() => setDetails({ ...details, trip_tags: selected ? details.trip_tags.filter((value) => value !== item) : [...details.trip_tags, item] })} className={`rounded-full border-2 px-4 py-2 text-sm ${selected ? "border-primary bg-secondary" : "border-border bg-card"}`}>{item}</button>; })}</div>
+      <label className="mt-5 block text-sm font-semibold">Private notes <span className="font-normal text-muted-foreground">(optional)</span><textarea maxLength={1000} rows={3} className="mt-2 w-full rounded-xl border-2 border-border bg-card p-3 font-normal" value={details.private_notes} onChange={(event) => setDetails({ ...details, private_notes: event.target.value })} placeholder="Anything your confirmed trip members should know…" /></label>
+      <p className="text-xs text-muted-foreground">Only you can see these until both travelers accept the plan. Then only members of that confirmed trip can see them.</p>
+      <PrimaryButton disabled={busy} className="mt-6" onClick={() => { const tags = details.trip_tags.filter((item) => items.includes(item)); const g: Gear[] = [...(tags.includes("Car") ? ["car" as const] : []), ...(tags.includes("Tent") ? ["tent" as const] : [])]; void finishOnboarding(g); }}>{busy ? "Saving plan…" : "Save plan and find matches"}</PrimaryButton>
+    </QuestionScreen>;
   }
 
   if (step === "matches") {
     return (
       <Screen step={BREAKS.find((b) => b.id === breakId)?.label ?? ""} assistantContext={JSON.stringify({ destinations: dests, budget, vibes, mbti })}>
         <h1 className="text-3xl font-extrabold">Your matches</h1>
-        <p className="mt-1 text-muted-foreground">Ranked by how well your plans fit.</p>
-        {mbtiNotice && <p role="status" className="mt-3 text-xs text-muted-foreground">MBTI is saved on this device. The team needs to update the database to share it with other travelers.</p>}
+        <p className="mt-1 text-muted-foreground">Ranked by how well your plans fit. Identities stay hidden until a confirmed match.</p>
+        {savedProfile?.localOnly && <p role="status" className="mt-3 rounded-xl bg-secondary p-3 text-sm">Saved on this device only. Shared storage isn’t connected; the matches below are sample trips.</p>}
+        <button onClick={() => setStep("browse")} className="mt-4 text-sm font-semibold text-primary underline">Explore all trips, regardless of score</button>
+        {matching && <p role="status" className="mt-4">Your plan is saved. Loading matches…</p>}
+        {mbtiNotice && <p role="status" className="mt-3 text-xs text-muted-foreground">Your extended profile is saved on this device. The team’s storage update is needed to share it with confirmed trip members.</p>}
         <p className="mt-2 text-xs text-muted-foreground">MBTI compares shared preferences, not proven travel compatibility.</p>
         <div className="mt-6 space-y-3">
-          {matches.length === 0 && <p className="rounded-2xl bg-muted p-6 text-center text-muted-foreground">No close matches yet — try a different break or destination.</p>}
+          {!matching && matches.length === 0 && <p className="rounded-2xl bg-muted p-6 text-center text-muted-foreground">No close matches yet — try a different break or destination.</p>}
           {matches.map((m) => (
-            <button key={m.profile.id} disabled={busy} onClick={() => openMatch(m.profile.id)} className="w-full rounded-2xl bg-card p-4 text-left shadow-card transition active:scale-[0.99] disabled:opacity-60">
+            <article key={m.profile.id} className="trip-plan-card w-full p-4 text-left">
+              <DestinationImage destination={m.profile.destinations[0] ?? "Trip"} />
               <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary font-display text-lg font-bold text-primary">{m.profile.first_name[0]}</div>
                 <div className="flex-1">
@@ -318,15 +323,17 @@ function App() {
                 </div>
                 <div className="text-right"><div className="font-display text-2xl font-extrabold text-primary">{m.score}%</div><div className="text-xs text-muted-foreground">match</div></div>
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">{m.mbtiPercent === null ? "MBTI not provided by both travelers" : `MBTI preference match: ${m.mbtiPercent}% (${m.profile.mbti})`}</p>
+              <p className="mt-2 text-xs text-muted-foreground">{m.mbtiPercent === null ? "MBTI not provided by both travelers" : `MBTI preference match: ${m.mbtiPercent}% shared preferences`}</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {m.reasons.map((r, i) => <Chip key={r} tone={i === 0 ? "gold" : "muted"}>{r}</Chip>)}
               </div>
-            </button>
+              <PrimaryButton className="mt-4" disabled={busy} onClick={() => openMatch(m.profile.id)}>View shared plan</PrimaryButton>
+            </article>
           ))}
         </div>
         {busy && <p className="mt-4 text-center text-sm font-semibold text-primary">Merging your plans…</p>}
         {err && <p className="mt-3 text-sm text-destructive">{err}</p>}
+        <button className="mt-6 self-start text-sm text-primary underline" onClick={() => setStep("entry")}>← Home</button>
         <GhostButton className="mt-6" onClick={() => setStep(1)}>Change my answers</GhostButton>
       </Screen>
     );
@@ -339,8 +346,12 @@ function App() {
         busy={busy}
         err={err}
         onBack={() => setStep("matches")}
-        onAccept={() => run(async () => { await decideFn({ data: { proposalId: proposal.proposalId, status: "accepted" } }); navigate({ to: "/trip/$id", params: { id: proposal.proposalId } }); })}
-        onPass={() => run(async () => { await decideFn({ data: { proposalId: proposal.proposalId, status: "passed" } }); setMatches(matches.filter((m) => m.profile.id !== proposal.them.id)); setStep("matches"); })}
+        onAccept={() => run(async () => {
+          if (proposal.source === "demo") saveDemoTrip(proposal.proposalId, { status: "accepted", viewerId: proposal.me.id, acceptedBy: [proposal.me.id, proposal.them.id], merged: proposal.merged, travelers: [proposal.me, { ...proposal.them, first_name: "Sample traveler" }], itinerary: buildItinerary(proposal.me.break_id, proposal.merged, [proposal.me, proposal.them]), isDemo: true });
+          else await decideFn({ data: { proposalId: proposal.proposalId, status: "accepted" } });
+          navigate({ to: "/trip/$id", params: { id: proposal.proposalId } });
+        })}
+        onPass={() => run(async () => { if (proposal.source !== "demo") await decideFn({ data: { proposalId: proposal.proposalId, status: "passed" } }); setMatches(matches.filter((m) => m.profile.id !== proposal.them.id)); setStep("matches"); })}
         onCounter={(o) => openMatch(proposal.them.id, o)}
       />
     );
@@ -389,8 +400,9 @@ function MergeScreen({ proposal, busy, err, onBack, onAccept, onPass, onCounter 
         ))}
       </div>
 
-      <GroupPersonality members={[me, them]} />
-      <TravelerChat key={proposal.proposalId} proposalId={proposal.proposalId} sample={!!me.is_seed || !!them.is_seed} />
+      <DestinationImage destination={merged.destination} />
+      {proposal.source === "demo" && <p className="mt-3 text-xs text-muted-foreground">Local demonstration with a sample traveler. No real invitation or booking will be sent.</p>}
+      <p className="mt-4 text-sm text-muted-foreground">Traveler chat unlocks after this plan is confirmed.</p>
       {countering ? (
         <div className="mt-6 space-y-3 rounded-2xl border-2 border-accent bg-card p-4">
           <div className="font-bold">Counter-propose</div>

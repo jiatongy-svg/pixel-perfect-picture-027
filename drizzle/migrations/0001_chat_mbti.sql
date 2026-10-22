@@ -23,7 +23,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
   JOIN public.trip_profiles a ON a.id = p.user_profile_id
   JOIN public.trip_profiles b ON b.id = p.match_profile_id
   JOIN auth.users u ON u.id = auth.uid()
-  WHERE p.id = thread_id AND p.status IN ('proposed', 'countered', 'accepted')
+  WHERE p.id = thread_id AND p.status = 'accepted'
    AND NOT a.is_seed AND NOT b.is_seed AND u.email_confirmed_at IS NOT NULL
    AND lower(u.email) IN (lower(a.email), lower(b.email))
  );

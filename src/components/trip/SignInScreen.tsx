@@ -28,11 +28,11 @@ export function SignInScreen({ email, onEmailChange, onContinue, ssoEnabled, onS
 
   return (
     <Screen>
-      <main className="flex flex-1 flex-col justify-center py-10">
+      <main className="mx-auto flex w-full max-w-[480px] flex-1 flex-col justify-center py-8">
         <p className="mb-3 text-sm font-semibold text-primary">USC Marshall MSBA</p>
         <h1 className="text-4xl font-extrabold">Your next trip starts here.</h1>
         <p className="mt-3 text-muted-foreground">Find classmates to travel with.</p>
-        <section aria-labelledby="signin-heading" className="mt-8 overflow-hidden rounded-2xl border border-border border-t-8 border-t-primary bg-card p-6 shadow-card">
+        <section aria-labelledby="signin-heading" className="trip-frame mt-8 overflow-hidden p-5">
           <h2 id="signin-heading" className="text-2xl font-bold">Welcome to TripMatch</h2>
           {ssoEnabled ? (
             <>
@@ -57,7 +57,7 @@ export function SignInScreen({ email, onEmailChange, onContinue, ssoEnabled, onS
                 <PrimaryButton type="submit" disabled={busy}>Continue</PrimaryButton>
                 <a href="https://my.usc.edu/" target="_blank" rel="noopener noreferrer"
                   aria-describedby="usc-link-note" onClick={() => setSsoError("TripMatch login failed: USC approval is still needed to connect USC sign-in. Return to this tab and use Continue to try the prototype.")}
-                  className="flex h-14 items-center justify-center rounded-2xl border-2 border-border bg-card px-2 text-center text-sm font-semibold text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                  className="flex h-14 items-center justify-center rounded-xl border border-primary bg-card px-2 text-center text-sm font-semibold text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                   Sign in with USC
                 </a>
               </div>

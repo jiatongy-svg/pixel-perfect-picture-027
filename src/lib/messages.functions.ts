@@ -7,8 +7,8 @@ async function threadAccess(proposalId: string) {
   const { verifiedEmail } = await import("./trip-access.server");
   const email = await verifiedEmail(true);
   const { supabaseAdmin: db } = await import("@/integrations/supabase/client.server");
-  const { data: proposal, error } = await db.from("proposals").select("user_profile_id,match_profile_id,status").eq("id", proposalId).single();
-  if (error || !proposal || !["proposed", "countered", "accepted"].includes(proposal.status)) throw new Error("Chat is unavailable for this plan.");
+  const { data: proposal, error } = await db.from("proposals").select("user_profile_id,match_profile_id,status,accepted_by").eq("id", proposalId).single();
+  if (error || !proposal || proposal.status !== "accepted" || ![proposal.user_profile_id, proposal.match_profile_id].every((id) => proposal.accepted_by?.includes(id))) throw new Error("Chat is unavailable for this plan.");
   const { data: people } = await db.from("trip_profiles").select("id,email,is_seed,first_name").in("id", [proposal.user_profile_id, proposal.match_profile_id]);
   const me = people?.find((person) => person.email.toLowerCase() === email);
   if (!me || people?.length !== 2 || people.some((person) => person.is_seed)) throw new Error("Chat is only available to the real travelers in this plan.");

@@ -1,10 +1,12 @@
+import { DestinationImage } from "@/components/trip/DestinationImage";
+import { readDemoTrip, type TripData } from "@/lib/local-demo";
 import { GroupPersonality } from "@/components/trip/Personality";
 import { TravelerChat } from "@/components/trip/TravelerChat";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { Screen } from "@/components/trip/ui";
-import { getItinerary } from "@/lib/trip.functions";
+import { decide, getItinerary } from "@/lib/trip.functions";
 
 export const Route = createFileRoute("/trip/$id")({
   head: () => ({
@@ -20,30 +22,49 @@ export const Route = createFileRoute("/trip/$id")({
   component: TripPage,
 });
 
-type Data = Awaited<ReturnType<typeof getItinerary>>;
+type Data = TripData;
 const fmt = (s: string) => new Date(s + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 
 function TripPage() {
   const { id } = Route.useParams();
   const load = useServerFn(getItinerary);
+  const decision = useServerFn(decide);
+  const [busy, setBusy] = useState(false);
   const [data, setData] = useState<Data | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  useEffect(() => { load({ data: { proposalId: id } }).then(setData).catch((e) => setErr(String(e?.message ?? e))); }, [id, load]);
+  useEffect(() => {
+    let active = true;
+    const local = readDemoTrip(id);
+    if (local) { setData(local); return; }
+    load({ data: { proposalId: id } }).then((result) => { if (active) setData(result); }).catch(() => { if (active) setErr("This plan could not load. Please check your sign-in and try again."); });
+    return () => { active = false; };
+  }, [id, load]);
 
-  if (err) return <Screen><p className="text-destructive">{err}</p></Screen>;
+  if (err && !data) return <Screen><p role="alert" className="text-destructive">{err}</p><Link to="/" className="mt-5 text-primary underline">Return home</Link></Screen>;
   if (!data) return <Screen><p className="text-muted-foreground">Loading trip…</p></Screen>;
   const { merged, travelers, itinerary } = data;
+  const matched = data.status === "accepted";
+  async function accept() {
+    setBusy(true); setErr(null);
+    try { await decision({ data: { proposalId: id, status: "accepted" } }); setData(await load({ data: { proposalId: id } })); }
+    catch { setErr("Your acceptance could not be saved. Please retry."); }
+    finally { setBusy(false); }
+  }
   return (
-    <Screen step="Trip confirmed" assistantContext={JSON.stringify({ destination: merged.destination, start: merged.start_date, end: merged.end_date })}>
+    <Screen step={data.isDemo ? "Demo plan confirmed" : matched ? "Matched" : "Awaiting mutual match"} assistantContext={JSON.stringify({ destination: merged.destination, start: merged.start_date, end: merged.end_date })}>
+      <DestinationImage destination={merged.destination} />
+      {data.isDemo && <p role="status" className="mb-4 text-sm text-muted-foreground">Device-only demonstration with a sample traveler. No real person has joined this trip.</p>}
+      {!matched && <section className="mb-4 rounded-xl border border-border bg-card p-4"><h2 className="font-bold">Both travelers must accept</h2><p className="mt-2 text-sm text-muted-foreground">Profiles, private notes and chat stay locked until both people accept this plan.</p>{data.status !== "passed" && data.viewerId && !data.acceptedBy.includes(data.viewerId) ? <button disabled={busy} onClick={() => void accept()} className="mt-3 rounded-xl bg-primary px-4 py-3 font-semibold text-primary-foreground">{busy ? "Saving…" : "Accept this plan"}</button> : <p className="mt-2 text-sm">{data.status === "passed" ? "This plan is closed." : "Your acceptance is saved. Waiting for the other traveler."}</p>}</section>}
+      {err && <p role="alert" className="mb-3 text-sm text-destructive">{err}</p>}
       <div className="rounded-2xl bg-primary p-5 text-primary-foreground shadow-card">
-        <div className="text-xs font-semibold uppercase tracking-widest opacity-80">You're going to</div>
-        <h1 className="mt-1 text-3xl font-extrabold">{merged.destination}</h1>
+        <div className="text-xs font-semibold uppercase tracking-widest opacity-80">{matched ? "Shared plan" : "Proposed destination"}</div>
+        <h1 className="mt-1 text-3xl font-extrabold text-primary-foreground">{merged.destination}</h1>
         <div className="opacity-90">{fmt(merged.start_date)} – {fmt(merged.end_date)}</div>
       </div>
       <h2 className="mt-6 mb-2 text-lg font-bold">Who's going</h2>
       <div className="flex flex-wrap gap-2">
         {travelers.map((t, i) => (
-          <span key={t.id} className="rounded-full bg-secondary px-4 py-2 text-sm font-semibold">{i === 0 ? `${t.first_name} (you)` : t.first_name} · {t.msba_year}</span>
+          <span key={t.id} className="rounded-full bg-secondary px-4 py-2 text-sm font-semibold">{t.id === data.viewerId ? `${t.first_name} (you)` : t.first_name} · {t.msba_year}</span>
         ))}
       </div>
       <h2 className="mt-6 mb-2 text-lg font-bold">Day by day</h2>
@@ -63,8 +84,10 @@ function TripPage() {
         <div className="mt-2 flex justify-between border-t border-border pt-2 text-sm text-muted-foreground"><span>Estimated total</span><span>${itinerary.total}</span></div>
         {itinerary.needsCar && <p className="mt-2 text-sm text-muted-foreground">🚗 {itinerary.driver ? `${itinerary.driver} drives — gas split evenly.` : "Car needed — consider a rental, split evenly."}</p>}
       </div>
-      <GroupPersonality members={travelers} />
-      <TravelerChat proposalId={id} sample={travelers.some((traveler) => traveler.is_seed)} />
+      {matched && <><GroupPersonality members={travelers} />
+      <section className="mt-6 space-y-3"><h2 className="text-lg font-bold">Traveler profiles</h2>{travelers.map((traveler) => <article key={traveler.id} className="rounded-xl border border-border bg-card p-4"><h3 className="font-semibold">{traveler.first_name} · {traveler.details?.year ?? traveler.msba_year}</h3>{traveler.details?.bio && <p className="mt-2 text-sm">{traveler.details.bio}</p>}<p className="mt-2 text-xs text-muted-foreground">{[traveler.details?.pace, traveler.details?.rhythm, traveler.details?.stay].filter(Boolean).join(" · ")}</p>{traveler.details?.private_notes && <div className="mt-3 rounded-lg bg-secondary p-3 text-sm"><p className="font-semibold">Note shared with this confirmed trip</p><p className="mt-1 whitespace-pre-wrap">{traveler.details.private_notes}</p></div>}</article>)}</section>
+      <TravelerChat proposalId={id} sample={!!data.isDemo || travelers.some((traveler) => traveler.is_seed)} /></>}
+      {!matched && <p className="mt-6 rounded-xl bg-muted p-4 text-sm">Traveler chat unlocks only after a mutual match.</p>}
       <Link to="/" className="mt-8 text-center text-sm font-semibold text-primary underline">Find another trip</Link>
     </Screen>
   );

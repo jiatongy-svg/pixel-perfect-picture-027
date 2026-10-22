@@ -16,19 +16,30 @@ export async function verifiedEmail(required = false): Promise<string | null> {
   return user.email.toLowerCase();
 }
 
+export async function currentActor() {
+  const hasToken = !!getRequest().headers.get("authorization");
+  if (uscSsoEnabled || hasToken) return { email: await verifiedEmail(true), profileId: null };
+  const { deviceProfile } = await import("./device-session.server");
+  return { email: null, profileId: await deviceProfile() };
+}
+
 export async function requireProfileOwner(profileId: string) {
-  const email = await verifiedEmail();
-  if (!email) return;
+  const actor = await currentActor();
+  if (actor.profileId === profileId) return;
+  if (!actor.email) throw new Error("You can only change your own trip. Please sign in again.");
   const { data, error } = await supabaseAdmin.from("trip_profiles").select("email").eq("id", profileId).single();
-  if (error || data?.email.toLowerCase() !== email) throw new Error("You can only change your own trip.");
+  if (error || data?.email.toLowerCase() !== actor.email) throw new Error("You can only change your own trip.");
 }
 
 export async function requireProposalAccess(proposalId: string, ownerOnly: boolean) {
-  const email = await verifiedEmail();
-  if (!email) return;
+  const actor = await currentActor();
+  if (!actor.email && !actor.profileId) throw new Error("Please sign in to view this plan.");
   const { data: proposal, error } = await supabaseAdmin.from("proposals").select("user_profile_id, match_profile_id").eq("id", proposalId).single();
   if (error || !proposal) throw new Error("Trip not found.");
   const ids = ownerOnly ? [proposal.user_profile_id] : [proposal.user_profile_id, proposal.match_profile_id];
-  const { data: profiles } = await supabaseAdmin.from("trip_profiles").select("email").in("id", ids);
-  if (!profiles?.some((profile) => profile.email.toLowerCase() === email)) throw new Error("You do not have access to this trip.");
+  if (actor.profileId && ids.includes(actor.profileId)) return actor.profileId;
+  const { data: profiles } = await supabaseAdmin.from("trip_profiles").select("id,email").in("id", ids);
+  const member = profiles?.find((profile) => profile.email.toLowerCase() === actor.email);
+  if (!member) throw new Error("You do not have access to this trip.");
+  return member.id;
 }

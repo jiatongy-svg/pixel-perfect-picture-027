@@ -15,6 +15,13 @@
       "when": 1792692000000,
       "tag": "0001_chat_mbti",
       "breakpoints": false
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792692000001,
+      "tag": "0002_profiles_and_mutual_match",
+      "breakpoints": false
     }
   ]
 }

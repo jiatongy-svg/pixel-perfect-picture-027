@@ -22,6 +22,7 @@ export type Database = {
       }
       proposals: {
         Row: {
+          accepted_by: string[]
           created_at: string
           id: string
           match_profile_id: string
@@ -32,6 +33,7 @@ export type Database = {
           user_profile_id: string
         }
         Insert: {
+          accepted_by?: string[]
           created_at?: string
           id?: string
           match_profile_id: string
@@ -42,6 +44,7 @@ export type Database = {
           user_profile_id: string
         }
         Update: {
+          accepted_by?: string[]
           created_at?: string
           id?: string
           match_profile_id?: string
@@ -80,6 +83,7 @@ export type Database = {
           gear: string[]
           id: string
           is_seed: boolean
+          details: Json
           mbti: string | null
           msba_year: string
           start_date: string
@@ -96,6 +100,7 @@ export type Database = {
           gear?: string[]
           id?: string
           is_seed?: boolean
+          details?: Json
           mbti?: string | null
           msba_year?: string
           start_date: string
@@ -112,6 +117,7 @@ export type Database = {
           gear?: string[]
           id?: string
           is_seed?: boolean
+          details?: Json
           mbti?: string | null
           msba_year?: string
           start_date?: string
@@ -124,7 +130,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      decide_trip_plan: { Args: { p_proposal: string; p_actor: string; p_status: string }; Returns: string }
     }
     Enums: {
       [_ in never]: never

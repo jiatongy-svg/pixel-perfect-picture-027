@@ -1,3 +1,4 @@
+import type { TravelerDetails } from "./traveler";
 import type { Mbti } from "./personality";
 export type BreakId = "thanksgiving" | "winter" | "spring" | "weekend";
 export type Vibe = "Adventure" | "Artsy" | "Touristy" | "Relaxed";
@@ -5,10 +6,10 @@ export type Budget = "under300" | "300-700" | "700plus";
 export type Gear = "car" | "tent";
 
 export const BREAKS: { id: BreakId; label: string; start: string; end: string }[] = [
+  { id: "weekend", label: "A weekend", start: "2026-11-07", end: "2026-11-08" },
   { id: "thanksgiving", label: "Thanksgiving", start: "2026-11-25", end: "2026-11-29" },
   { id: "winter", label: "Winter break", start: "2026-12-19", end: "2027-01-03" },
   { id: "spring", label: "Spring break", start: "2027-03-13", end: "2027-03-21" },
-  { id: "weekend", label: "A weekend", start: "2026-11-07", end: "2026-11-08" },
 ];
 
 export const VIBES: Vibe[] = ["Adventure", "Artsy", "Touristy", "Relaxed"];
@@ -69,6 +70,7 @@ export function findDestination(breakId: BreakId, name: string): Destination | u
 }
 
 export type TripProfile = {
+  details?: TravelerDetails;
   mbti?: Mbti | null;
   is_seed?: boolean;
   id: string;
