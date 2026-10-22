@@ -58,13 +58,14 @@ function App() {
 
   const total = 5;
   const firstName = (() => {
-    const n = email.split("@")[0].split(/[._-]/)[0] ?? "";
-    return n ? n[0].toUpperCase() + n.slice(1) : "Trojan";
+    const n = (email.split("@")[0] ?? "").split(/[._-]/)[0] ?? "";
+    return n ? n.charAt(0).toUpperCase() + n.slice(1) : "Trojan";
   })();
 
-  async function run<T>(fn: () => Promise<T>) {
+  async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
     setBusy(true); setErr(null);
     try { return await fn(); } catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong"); } finally { setBusy(false); }
+    return undefined;
   }
 
   async function finishOnboarding(g: Gear[]) {
@@ -75,7 +76,7 @@ function App() {
       if (mode === "plan") {
         start = custom.start; end = custom.end || custom.start; destinations = [custom.destination.trim()];
       } else {
-        const top = findDestination(b, dests[0])!;
+        const top = findDestination(b, dests[0] ?? "")!;
         start = top.start; end = top.end; destinations = dests;
       }
       const p = await save({ data: { email, first_name: firstName, msba_year: "MSBA 2027", break_id: b, vibes, destinations, start_date: start, end_date: end, budget: budget!, gear: g } });
@@ -171,7 +172,7 @@ function App() {
             {VIBES.map((v) => {
               const on = vibes.includes(v);
               return (
-                <Option key={v} selected={on} onClick={() => setVibes(on ? vibes.filter((x) => x !== v) : vibes.length < 2 ? [...vibes, v] : [vibes[1], v])}>
+                <Option key={v} selected={on} onClick={() => setVibes(on ? vibes.filter((x) => x !== v) : vibes.length < 2 ? [...vibes, v] : [vibes[1]!, v])}>
                   <div className="py-2 text-center font-bold">{v}</div>
                 </Option>
               );
@@ -243,7 +244,7 @@ function App() {
 
   if (step === "matches") {
     return (
-      <Screen step={BREAKS.find((b) => b.id === breakId)?.label}>
+      <Screen step={BREAKS.find((b) => b.id === breakId)?.label ?? ""}>
         <h1 className="text-3xl font-extrabold">Your matches</h1>
         <p className="mt-1 text-muted-foreground">Ranked by how well your plans fit.</p>
         <div className="mt-6 space-y-3">

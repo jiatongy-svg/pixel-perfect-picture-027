@@ -36,7 +36,7 @@ export const getMatches = createServerFn({ method: "POST" })
   });
 
 async function aiMerge(me: TripProfile, them: TripProfile, rules: MergedPlan, override?: Partial<Plan>): Promise<MergedPlan | null> {
-  const key = process.env.LOVABLE_API_KEY;
+  const key = process.env['LOVABLE_API_KEY'];
   if (!key) return null;
   try {
     const res = await fetch("https://ai.gateway.lovable.dev/v1/responses", {
@@ -121,7 +121,7 @@ async function aiMerge(me: TripProfile, them: TripProfile, rules: MergedPlan, ov
 }
 
 export const proposeMerge = createServerFn({ method: "POST" })
-  .inputValidator((d: { profileId: string; matchId: string; override?: Partial<Plan> }) => d)
+  .inputValidator((d: { profileId: string; matchId: string; override?: Partial<Plan> | undefined }) => d)
   .handler(async ({ data }) => {
     const db = await admin();
     const { data: rows } = await db.from("trip_profiles").select().in("id", [data.profileId, data.matchId]);
@@ -164,5 +164,5 @@ export const getItinerary = createServerFn({ method: "POST" })
     const { data: rows } = await db.from("trip_profiles").select().in("id", [prop.user_profile_id, prop.match_profile_id]);
     const travelers = [prop.user_profile_id, prop.match_profile_id].map((id) => toProfile(rows!.find((r) => r.id === id)!));
     const merged = prop.merged as unknown as MergedPlan;
-    return { status: prop.status, merged, travelers, itinerary: buildItinerary(travelers[0].break_id, merged, travelers) };
+    return { status: prop.status, merged, travelers, itinerary: buildItinerary(travelers[0]!.break_id, merged, travelers) };
   });
