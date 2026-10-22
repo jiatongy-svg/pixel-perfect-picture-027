@@ -56,17 +56,20 @@ function App() {
 
   const [restoring, setRestoring] = useState(uscSsoEnabled);
   useEffect(() => {
-    if (!uscSsoEnabled) {
-      const e = localStorage.getItem("tm_email");
-      if (e && isUscEmail(e)) { setEmail(e); setStep("entry"); }
-      return;
-    }
     // A stored email alone never counts as an authenticated SSO session.
     let active = true;
     let version = 0;
     async function restore() {
       const current = ++version;
       try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData.session && !uscSsoEnabled) {
+          if (active && current === version) {
+            const e = localStorage.getItem("tm_email");
+            if (e && isUscEmail(e)) { setEmail(e); setStep("entry"); }
+          }
+          return;
+        }
         const { data, error } = await supabase.auth.getUser();
         if (!active || current !== version) return;
         const user = data.user;
@@ -74,7 +77,7 @@ function App() {
           setEmail(user.email); setStep("entry");
         } else { setEmail(""); setStep("signin"); }
       } catch {
-        if (active && current === version) setErr("Could not restore your sign-in. Please try again.");
+        if (active && current === version && uscSsoEnabled) setErr("Could not restore your sign-in. Please try again.");
       } finally { if (active && current === version) setRestoring(false); }
     }
     void restore();
@@ -98,7 +101,7 @@ function App() {
 
   async function signOut() {
     await run(async () => {
-      if (uscSsoEnabled) {
+      if (uscSsoEnabled || (await supabase.auth.getSession()).data.session) {
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
       }

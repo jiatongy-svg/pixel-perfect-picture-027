@@ -1,6 +1,6 @@
 # Short sign-in branch
 
-The default prototype flow takes a USC email and continues immediately. There is no password field, email delivery, login code, or check-your-inbox screen. This preserves Thomas's original unverified prototype access and does not authenticate the address.
+The default screen places Continue and Sign in with USC side by side. Continue takes a USC email and enters the prototype immediately. Sign in with USC requests the configured USC identity-provider redirect without requiring an email entry first. A failed SSO request shows a setup message and does not submit the prototype form. There is no password field, email delivery, login code, or check-your-inbox screen. This preserves Thomas's original unverified prototype access and does not authenticate the address.
 
 The new card uses TripMatch branding and a cardinal top border inspired by the reference. It does not copy USC's credential form or collect NetID passwords.
 
