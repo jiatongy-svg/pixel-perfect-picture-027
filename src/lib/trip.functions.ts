@@ -1,3 +1,4 @@
+import { isMbti } from "./personality";
 import { createServerFn } from "@tanstack/react-start";
 import { buildItinerary, mergeRules, planOf, rankMatches } from "./matching";
 import type { MergedPlan, Plan, TripProfile } from "./trip-data";
@@ -12,6 +13,7 @@ const toProfile = (r: Record<string, unknown>) => r as unknown as TripProfile;
 export const saveProfile = createServerFn({ method: "POST" })
   .inputValidator((d: Omit<TripProfile, "id">) => {
     if (!/^[^@\s]+@usc\.edu$/i.test(d.email)) throw new Error("Use a @usc.edu email");
+    if (d.mbti != null && !isMbti(d.mbti)) throw new Error("Choose a valid MBTI type.");
     return d;
   })
   .handler(async ({ data }) => {
@@ -19,25 +21,30 @@ export const saveProfile = createServerFn({ method: "POST" })
     const email = await verifiedEmail();
     if (email && data.email.toLowerCase() !== email) throw new Error("Use the email from your USC sign-in.");
     const db = await admin();
-    const { data: row, error } = await db
-      .from("trip_profiles")
-      .upsert({ ...data, email: data.email.toLowerCase(), is_seed: false }, { onConflict: "email" })
-      .select()
-      .single();
-    if (error) throw new Error(error.message);
-    return toProfile(row);
+    const { mbti, ...fields } = data;
+    const values = { ...fields, email: data.email.toLowerCase(), is_seed: false };
+    let result = await db.from("trip_profiles").upsert({ ...values, ...(mbti !== undefined ? { mbti } : {}) }, { onConflict: "email" }).select().single();
+    let mbtiPersisted = true;
+    if (result.error && /mbti/i.test(result.error.message) && ["PGRST204", "42703"].includes(result.error.code)) {
+      // Keep existing deployments usable until the additive migration is applied.
+      result = await db.from("trip_profiles").upsert(values, { onConflict: "email" }).select().single();
+      mbtiPersisted = false;
+    }
+    if (result.error) throw new Error(result.error.message);
+    return { ...toProfile(result.data), mbti: mbti ?? null, mbtiPersisted };
   });
 
 export const getMatches = createServerFn({ method: "POST" })
-  .inputValidator((d: { profileId: string }) => d)
+  .inputValidator((d: { profileId: string; mbti?: import("./personality").Mbti | null }) => { if (d.mbti != null && !isMbti(d.mbti)) throw new Error("Invalid MBTI"); return d; })
   .handler(async ({ data }) => {
     const { requireProfileOwner } = await import("./trip-access.server");
     await requireProfileOwner(data.profileId);
     const db = await admin();
     const { data: me } = await db.from("trip_profiles").select().eq("id", data.profileId).single();
     if (!me) throw new Error("Profile not found");
-    const { data: pool } = await db.from("trip_profiles").select().eq("break_id", me.break_id).eq("is_seed", true);
-    return { me: toProfile(me), matches: rankMatches(toProfile(me), (pool ?? []).map(toProfile)) };
+    const { data: pool } = await db.from("trip_profiles").select().eq("break_id", me.break_id).neq("id", me.id);
+    const profile = { ...toProfile(me), ...(data.mbti !== undefined ? { mbti: data.mbti } : {}) };
+    return { me: profile, matches: rankMatches(profile, (pool ?? []).map(toProfile)) };
   });
 
 async function aiMerge(me: TripProfile, them: TripProfile, rules: MergedPlan, override?: Partial<Plan>): Promise<MergedPlan | null> {

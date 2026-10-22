@@ -1,9 +1,10 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { TripAssistant } from "./TripAssistant";
 import { cn } from "@/lib/utils";
 
-export function Screen({ children, step }: { children: ReactNode; step?: string | undefined }) {
+export function Screen({ children, step, assistantContext }: { children: ReactNode; step?: string | undefined; assistantContext?: string | undefined }) {
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col px-5 pb-10 pt-6">
+    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col px-5 pb-24 pt-6">
       <header className="mb-6 flex items-center justify-between">
         <span className="font-display text-lg font-extrabold text-primary">
           Trip<span className="text-accent-foreground">Match</span>
@@ -12,6 +13,7 @@ export function Screen({ children, step }: { children: ReactNode; step?: string 
         {step && <span className="text-xs font-semibold text-muted-foreground">{step}</span>}
       </header>
       {children}
+      <TripAssistant context={assistantContext} />
     </div>
   );
 }

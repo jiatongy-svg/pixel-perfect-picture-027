@@ -32,6 +32,11 @@ describe("SSO request access", () => {
     mocks.single.mockResolvedValue({ data: { email: "student@usc.edu" }, error: null });
     await expect(requireProfileOwner("my-profile")).resolves.toBeUndefined();
   });
+  it("requires a verified session for real messages even when prototype access is enabled", async () => {
+    mocks.enabled.value = false;
+    mocks.header.value = null;
+    await expect(verifiedEmail(true)).rejects.toThrow("Please sign in with USC");
+  });
   it("preserves the original prototype mode when SSO is off", async () => {
     mocks.enabled.value = false;
     await expect(verifiedEmail()).resolves.toBeNull();

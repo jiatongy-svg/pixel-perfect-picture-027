@@ -20,3 +20,7 @@ SSO mode ignores the old `tm_email` browser value. Profile saves use the verifie
 This remains a competition prototype: match candidates still come from the repository's sample profiles and accepting a plan still uses its existing one-sided confirmation logic.
 
 Documentation: https://supabase.com/docs/reference/javascript/auth-signinwithsso
+
+## Portal preview before USC approval
+
+In prototype mode, the USC button opens https://my.usc.edu/ in a separate tab. That official entry point initiates Shibboleth and reaches the USC credential page. Directly opening the login.usc.edu root returns 403. TripMatch displays a login-failed/USC-approval note and never claims an authenticated session from this preview link. Users return to the TripMatch tab themselves. After successful university login the external tab belongs to myUSC, not TripMatch.

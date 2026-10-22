@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { GhostButton, PrimaryButton, Screen } from "./ui";
+import { PrimaryButton, Screen } from "./ui";
 import { isUscEmail } from "@/lib/sign-in";
 
 type Props = {
@@ -55,11 +55,13 @@ export function SignInScreen({ email, onEmailChange, onContinue, ssoEnabled, onS
               {invalid && <p id="email-error" role="alert" className="mt-2 text-sm text-destructive">Enter your @usc.edu email.</p>}
               <div className="mt-4 grid grid-cols-2 gap-3">
                 <PrimaryButton type="submit" disabled={busy}>Continue</PrimaryButton>
-                <GhostButton type="button" onClick={signIn} disabled={busy || restoring} aria-busy={busy || restoring} className="px-2 text-sm">
-                  {busy ? "Connecting…" : "Sign in with USC"}
-                </GhostButton>
+                <a href="https://my.usc.edu/" target="_blank" rel="noopener noreferrer"
+                  aria-describedby="usc-link-note" onClick={() => setSsoError("TripMatch login failed: USC approval is still needed to connect USC sign-in. Return to this tab and use Continue to try the prototype.")}
+                  className="flex h-14 items-center justify-center rounded-2xl border-2 border-border bg-card px-2 text-center text-sm font-semibold text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                  Sign in with USC
+                </a>
               </div>
-              <p className="mt-3 text-xs text-muted-foreground">Prototype access. No password or email code needed.</p>
+              <p id="usc-link-note" className="mt-3 text-xs text-muted-foreground">Continue skips email verification. USC sign-in opens in a new tab and still needs USC approval.</p>
             </form>
           )}
           {(ssoError || error) && <p role="alert" className="mt-4 text-sm text-destructive">{ssoError || error}</p>}

@@ -1,3 +1,4 @@
+import { mbtiSimilarity } from "./personality";
 import { BUDGETS, findDestination, type MergeChange, type MergedPlan, type Plan, type TripProfile } from "./trip-data";
 
 const DAY = 86400000;
@@ -9,7 +10,7 @@ export function planOf(p: TripProfile): Plan {
   return { destination: p.destinations[0] ?? "", start_date: p.start_date, end_date: p.end_date };
 }
 
-export type Match = { profile: TripProfile; score: number; reasons: string[] };
+export type Match = { profile: TripProfile; score: number; reasons: string[]; mbtiPercent: number | null };
 
 export function scoreMatch(me: TripProfile, them: TripProfile): Match | null {
   if (me.break_id !== them.break_id || me.id === them.id) return null;
@@ -67,7 +68,10 @@ export function scoreMatch(me: TripProfile, them: TripProfile): Match | null {
   }
 
   if (reasons.length < 2) reasons.push(diff <= 5 ? `Dates ${diff} days apart` : "Same break");
-  return { profile: them, score: Math.min(99, score), reasons: reasons.slice(0, 3) };
+  const mbtiPercent = mbtiSimilarity(me.mbti, them.mbti);
+  // At most five bonus points, only when the travel preferences already qualify.
+  const bonus = score >= 25 && mbtiPercent !== null ? mbtiPercent / 20 : 0;
+  return { profile: them, score: Math.min(99, score + bonus), reasons: reasons.slice(0, 3), mbtiPercent };
 }
 
 export function rankMatches(me: TripProfile, pool: TripProfile[], limit = 5): Match[] {

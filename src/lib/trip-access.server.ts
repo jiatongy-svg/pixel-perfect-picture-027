@@ -4,8 +4,8 @@ import { isUscEmail, uscSsoEnabled } from "./sign-in";
 
 // The existing prototype mode remains unchanged. SSO mode verifies each request
 // on the server, so changing browser state cannot impersonate another student.
-export async function verifiedEmail(): Promise<string | null> {
-  if (!uscSsoEnabled) return null;
+export async function verifiedEmail(required = false): Promise<string | null> {
+  if (!uscSsoEnabled && !required) return null;
   const header = getRequest().headers.get("authorization");
   if (!header?.startsWith("Bearer ")) throw new Error("Please sign in with USC.");
   const { data, error } = await supabaseAdmin.auth.getUser(header.slice(7));

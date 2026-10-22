@@ -14,6 +14,12 @@ export type Database = {
   }
   public: {
     Tables: {
+      trip_messages: {
+        Row: { id: string; proposal_id: string; author_profile_id: string; client_id: string; body: string; created_at: string }
+        Insert: { id?: string; proposal_id: string; author_profile_id: string; client_id: string; body: string; created_at?: string }
+        Update: { body?: string }
+        Relationships: []
+      }
       proposals: {
         Row: {
           created_at: string
@@ -74,6 +80,7 @@ export type Database = {
           gear: string[]
           id: string
           is_seed: boolean
+          mbti: string | null
           msba_year: string
           start_date: string
           vibes: string[]
@@ -89,6 +96,7 @@ export type Database = {
           gear?: string[]
           id?: string
           is_seed?: boolean
+          mbti?: string | null
           msba_year?: string
           start_date: string
           vibes?: string[]
@@ -104,6 +112,7 @@ export type Database = {
           gear?: string[]
           id?: string
           is_seed?: boolean
+          mbti?: string | null
           msba_year?: string
           start_date?: string
           vibes?: string[]

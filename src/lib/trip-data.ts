@@ -1,3 +1,4 @@
+import type { Mbti } from "./personality";
 export type BreakId = "thanksgiving" | "winter" | "spring" | "weekend";
 export type Vibe = "Adventure" | "Artsy" | "Touristy" | "Relaxed";
 export type Budget = "under300" | "300-700" | "700plus";
@@ -68,6 +69,8 @@ export function findDestination(breakId: BreakId, name: string): Destination | u
 }
 
 export type TripProfile = {
+  mbti?: Mbti | null;
+  is_seed?: boolean;
   id: string;
   email: string;
   first_name: string;

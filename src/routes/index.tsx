@@ -1,3 +1,6 @@
+import { MbtiPicker, GroupPersonality } from "@/components/trip/Personality";
+import { TravelerChat } from "@/components/trip/TravelerChat";
+import { isMbti, type Mbti } from "@/lib/personality";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
@@ -41,6 +44,8 @@ function App() {
 
   const [step, setStep] = useState<Step>("signin");
   const [email, setEmail] = useState("");
+  const [mbti, setMbti] = useState<Mbti | null>(null);
+  const [mbtiNotice, setMbtiNotice] = useState(false);
   const [mode, setMode] = useState<"go" | "plan">("go");
   const [breakId, setBreakId] = useState<BreakId | null>(null);
   const [vibes, setVibes] = useState<Vibe[]>([]);
@@ -56,6 +61,8 @@ function App() {
 
   const [restoring, setRestoring] = useState(uscSsoEnabled);
   useEffect(() => {
+    const savedMbti = localStorage.getItem("tm_mbti");
+    if (isMbti(savedMbti)) setMbti(savedMbti);
     // A stored email alone never counts as an authenticated SSO session.
     let active = true;
     let version = 0;
@@ -106,6 +113,7 @@ function App() {
         if (error) throw error;
       }
       localStorage.removeItem("tm_email");
+      localStorage.removeItem("tm_mbti"); setMbti(null);
       setEmail(""); setProfileId(null); setMatches([]); setProposal(null); setStep("signin");
     });
   }
@@ -133,9 +141,10 @@ function App() {
         const top = findDestination(b, dests[0] ?? "")!;
         start = top.start; end = top.end; destinations = dests;
       }
-      const p = await save({ data: { email, first_name: firstName, msba_year: "MSBA 2027", break_id: b, vibes, destinations, start_date: start, end_date: end, budget: budget!, gear: g } });
+      const p = await save({ data: { email, mbti, first_name: firstName, msba_year: "MSBA 2027", break_id: b, vibes, destinations, start_date: start, end_date: end, budget: budget!, gear: g } });
       setProfileId(p.id);
-      const r = await fetchMatches({ data: { profileId: p.id } });
+      setMbtiNotice(!p.mbtiPersisted && !!mbti);
+      const r = await fetchMatches({ data: { profileId: p.id, mbti } });
       setMatches(r.matches);
       setStep("matches");
     });
@@ -144,7 +153,8 @@ function App() {
   async function openMatch(id: string, override?: { destination?: string; start_date?: string; end_date?: string }) {
     await run(async () => {
       const r = await propose({ data: { profileId: profileId!, matchId: id, override } });
-      setProposal(r as Proposal);
+      const result = r as Proposal;
+      setProposal({ ...result, me: { ...result.me, mbti } });
       setStep("merge");
     });
   }
@@ -164,6 +174,10 @@ function App() {
       <Screen>
         <h1 className="text-3xl font-extrabold">Hi {firstName} 👋</h1>
         <p className="mt-2 text-muted-foreground">Where are you starting from?</p>
+        <MbtiPicker value={mbti} onChange={(value) => {
+          setMbti(value);
+          if (value) localStorage.setItem("tm_mbti", value); else localStorage.removeItem("tm_mbti");
+        }} />
         <div className="mt-8 space-y-3">
           <Option onClick={() => { setMode("go"); setStep(1); }}>
             <div className="text-lg font-bold">I want to go somewhere</div>
@@ -185,7 +199,7 @@ function App() {
   if (typeof step === "number") {
     const back = () => setStep(step === 1 ? "entry" : ((step - 1) as Step));
     const Q = ({ title, children, next, canNext }: { title: string; children: React.ReactNode; next?: () => void; canNext?: boolean }) => (
-      <Screen step={`${step} of ${total}`}>
+      <Screen step={`${step} of ${total}`} assistantContext={JSON.stringify({ destinations: mode === "plan" ? custom.destination : dests, dates: custom, budget, vibes, mbti })}>
         <div className="mb-6 h-1.5 w-full rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${(step / total) * 100}%` }} /></div>
         <button onClick={back} className="mb-3 self-start text-sm font-semibold text-muted-foreground">← Back</button>
         <h2 className="mb-6 text-2xl font-extrabold">{title}</h2>
@@ -286,9 +300,11 @@ function App() {
 
   if (step === "matches") {
     return (
-      <Screen step={BREAKS.find((b) => b.id === breakId)?.label ?? ""}>
+      <Screen step={BREAKS.find((b) => b.id === breakId)?.label ?? ""} assistantContext={JSON.stringify({ destinations: dests, budget, vibes, mbti })}>
         <h1 className="text-3xl font-extrabold">Your matches</h1>
         <p className="mt-1 text-muted-foreground">Ranked by how well your plans fit.</p>
+        {mbtiNotice && <p role="status" className="mt-3 text-xs text-muted-foreground">MBTI is saved on this device. The team needs to update the database to share it with other travelers.</p>}
+        <p className="mt-2 text-xs text-muted-foreground">MBTI compares shared preferences, not proven travel compatibility.</p>
         <div className="mt-6 space-y-3">
           {matches.length === 0 && <p className="rounded-2xl bg-muted p-6 text-center text-muted-foreground">No close matches yet — try a different break or destination.</p>}
           {matches.map((m) => (
@@ -297,10 +313,12 @@ function App() {
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary font-display text-lg font-bold text-primary">{m.profile.first_name[0]}</div>
                 <div className="flex-1">
                   <div className="text-lg font-bold">{m.profile.first_name}</div>
+                  {m.profile.is_seed && <span className="text-xs text-muted-foreground">Sample profile</span>}
                   <div className="text-sm text-muted-foreground">{m.profile.msba_year} · {m.profile.destinations[0]}</div>
                 </div>
                 <div className="text-right"><div className="font-display text-2xl font-extrabold text-primary">{m.score}%</div><div className="text-xs text-muted-foreground">match</div></div>
               </div>
+              <p className="mt-2 text-xs text-muted-foreground">{m.mbtiPercent === null ? "MBTI not provided by both travelers" : `MBTI preference match: ${m.mbtiPercent}% (${m.profile.mbti})`}</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {m.reasons.map((r, i) => <Chip key={r} tone={i === 0 ? "gold" : "muted"}>{r}</Chip>)}
               </div>
@@ -348,7 +366,7 @@ function MergeScreen({ proposal, busy, err, onBack, onAccept, onPass, onCounter 
   );
 
   return (
-    <Screen step={`with ${them.first_name}`}>
+    <Screen step={`with ${them.first_name}`} assistantContext={JSON.stringify({ destination: merged.destination, start: merged.start_date, end: merged.end_date, budget: me.budget, mbti: me.mbti })}>
       <button onClick={onBack} className="mb-3 self-start text-sm font-semibold text-muted-foreground">← Matches</button>
       <h1 className="text-2xl font-extrabold">Your merged plan</h1>
       <div className="mt-4 grid grid-cols-2 gap-3">
@@ -371,6 +389,8 @@ function MergeScreen({ proposal, busy, err, onBack, onAccept, onPass, onCounter 
         ))}
       </div>
 
+      <GroupPersonality members={[me, them]} />
+      <TravelerChat key={proposal.proposalId} proposalId={proposal.proposalId} sample={!!me.is_seed || !!them.is_seed} />
       {countering ? (
         <div className="mt-6 space-y-3 rounded-2xl border-2 border-accent bg-card p-4">
           <div className="font-bold">Counter-propose</div>

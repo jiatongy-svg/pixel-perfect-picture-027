@@ -1,3 +1,5 @@
+import { GroupPersonality } from "@/components/trip/Personality";
+import { TravelerChat } from "@/components/trip/TravelerChat";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
@@ -32,7 +34,7 @@ function TripPage() {
   if (!data) return <Screen><p className="text-muted-foreground">Loading trip…</p></Screen>;
   const { merged, travelers, itinerary } = data;
   return (
-    <Screen step="Trip confirmed">
+    <Screen step="Trip confirmed" assistantContext={JSON.stringify({ destination: merged.destination, start: merged.start_date, end: merged.end_date })}>
       <div className="rounded-2xl bg-primary p-5 text-primary-foreground shadow-card">
         <div className="text-xs font-semibold uppercase tracking-widest opacity-80">You're going to</div>
         <h1 className="mt-1 text-3xl font-extrabold">{merged.destination}</h1>
@@ -61,6 +63,8 @@ function TripPage() {
         <div className="mt-2 flex justify-between border-t border-border pt-2 text-sm text-muted-foreground"><span>Estimated total</span><span>${itinerary.total}</span></div>
         {itinerary.needsCar && <p className="mt-2 text-sm text-muted-foreground">🚗 {itinerary.driver ? `${itinerary.driver} drives — gas split evenly.` : "Car needed — consider a rental, split evenly."}</p>}
       </div>
+      <GroupPersonality members={travelers} />
+      <TravelerChat proposalId={id} sample={travelers.some((traveler) => traveler.is_seed)} />
       <Link to="/" className="mt-8 text-center text-sm font-semibold text-primary underline">Find another trip</Link>
     </Screen>
   );
