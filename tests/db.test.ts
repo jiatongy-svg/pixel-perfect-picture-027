@@ -45,6 +45,13 @@ async function as<T = Record<string, unknown>>(who: keyof typeof ids | "service"
   }
 }
 
+// The (first) plan id of a user, read as the database owner.
+async function planOf(who: keyof typeof ids): Promise<string> {
+  await db.exec("reset role;");
+  return (await db.query<{ id: string }>("select id from public.travel_plans where user_id = $1 order by updated_at limit 1", [ids[who]])).rows[0].id;
+}
+const plansOf = (...who: (keyof typeof ids)[]) => Promise.all(who.map(planOf));
+
 const planSql = (id: string, notes: string) => `
   insert into public.travel_plans (user_id, timing_mode, break_id, date_mode, trip_length_min, trip_length_max,
     destinations, destination_flex, budget_min, budget_max, vibes, notes)
@@ -110,8 +117,10 @@ describe("RLS: profiles and plans", () => {
     expect(cards).toHaveLength(3);
   });
 
-  it("enforces one plan per user and validates input in the database", async () => {
-    await expect(as("ana", planSql(ids.ana, "dup"))).rejects.toThrow(/duplicate key/);
+  it("allows several plans per user, up to 5, and validates input in the database", async () => {
+    for (let i = 0; i < 4; i++) await as("ana", planSql(ids.ana, `extra ${i}`)); // 1 + 4 = 5
+    await expect(as("ana", planSql(ids.ana, "sixth"))).rejects.toThrow(/TOO_MANY_PLANS/);
+    await db.exec(`delete from public.travel_plans where user_id = '${ids.ana}' and notes like 'extra%'`);
     await expect(as("ana", "update public.travel_plans set budget_min = 500, budget_max = 100")).rejects.toThrow(/check constraint/);
     await expect(as("ana", "update public.travel_plans set vibes = '{partying}'")).rejects.toThrow(/check constraint/);
     await expect(as("ana", "update public.travel_plans set destinations = '{\"not\":\"a list\"}'")).rejects.toThrow(/check constraint/);
@@ -125,13 +134,13 @@ describe("proposals", () => {
 
   it("regular users cannot call create_proposal directly (server only)", async () => {
     await expect(
-      as("ana", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, [ids.ana, ids.ben], merged]),
+      as("ana", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, await plansOf("ana", "ben"), merged]),
     ).rejects.toThrow(/permission denied/);
   });
 
   it("creates v1 with the creator's approval; a double-click returns the same proposal", async () => {
-    const first = await as<{ proposal_id: string; created: boolean }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, [ids.ben, ids.ana], merged]);
-    const again = await as<{ proposal_id: string; created: boolean }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, [ids.ana, ids.ben], merged]);
+    const first = await as<{ proposal_id: string; created: boolean }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, await plansOf("ben", "ana"), merged]);
+    const again = await as<{ proposal_id: string; created: boolean }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, await plansOf("ana", "ben"), merged]);
     expect(first[0].created).toBe(true);
     expect(again[0]).toEqual({ proposal_id: first[0].proposal_id, created: false });
     pid = first[0].proposal_id;
@@ -176,24 +185,39 @@ describe("proposals", () => {
   });
 
   it("decline ends a proposal for everyone; then a new one can be opened", async () => {
-    const r = await as<{ proposal_id: string }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.cy, [ids.cy, ids.ana], merged]);
+    const r = await as<{ proposal_id: string }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.cy, await plansOf("cy", "ana"), merged]);
     const p2 = r[0].proposal_id;
     expect((await as("ana", "select public.decline_proposal($1, 1) as s", [p2]))[0].s).toBe("declined");
     expect((await as("cy", "select status, declined_by from public.proposals where id = $1", [p2]))[0]).toEqual({ status: "declined", declined_by: ids.ana });
     await expect(as("cy", "select public.accept_proposal($1, 1)", [p2])).rejects.toThrow(/NOT_PENDING/);
-    const r2 = await as<{ created: boolean }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.cy, [ids.cy, ids.ana], merged]);
+    const r2 = await as<{ created: boolean }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.cy, await plansOf("cy", "ana"), merged]);
     expect(r2[0].created).toBe(true);
   });
 
+  it("the same people can have separate open proposals for different plans", async () => {
+    await as("ana", planSql(ids.ana, "spring idea"));
+    await as("ben", planSql(ids.ben, "spring idea"));
+    await db.exec("reset role;");
+    const pick = async (who: "ana" | "ben") =>
+      (await db.query<{ id: string }>("select id from public.travel_plans where user_id = $1 and notes = 'spring idea'", [ids[who]])).rows[0].id;
+    const r = await as<{ created: boolean }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, [await pick("ana"), await pick("ben")], merged]);
+    expect(r[0].created).toBe(true);
+    // Two plans from the same person can't be in one proposal.
+    await expect(as("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, [await pick("ana"), await planOf("ana")], merged])).rejects.toThrow(/BAD_INPUT/);
+  });
+
   it("groups of three need all three approvals", async () => {
-    const r = await as<{ proposal_id: string }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, [ids.ana, ids.ben, ids.cy], merged]);
+    const r = await as<{ proposal_id: string }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, await plansOf("ana", "ben", "cy"), merged]);
     const g = r[0].proposal_id;
     expect((await as("ben", "select public.accept_proposal($1, 1) as s", [g]))[0].s).toBe("pending");
     expect((await as("cy", "select public.accept_proposal($1, 1) as s", [g]))[0].s).toBe("confirmed");
   });
 
   it("rejects proposals that include non-allowlisted people", async () => {
-    await expect(as("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, [ids.ana, ids.outsider], merged])).rejects.toThrow(/NOT_ALLOWED/);
+    await db.exec(`reset role;
+      insert into public.profiles (id, display_name, msba_year, travel_experience, pace, schedule, completed) values ('${ids.outsider}', 'Out', '1st', 'some', 'balanced', 'flexible', true);
+      ${planSql(ids.outsider, "x")};`);
+    await expect(as("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, await plansOf("ana", "outsider"), merged])).rejects.toThrow(/NOT_ALLOWED/);
   });
 
   it("pilot_stats counts joined students without exposing emails", async () => {
@@ -208,7 +232,7 @@ describe("proposals", () => {
     const dana = "00000000-0000-4000-8000-0000000000dd";
     await db.exec(`reset role; select set_config('request.jwt.claim.sub', '${dana}', false); set role authenticated;`);
     expect((await db.query<{ ok: boolean }>("select public.is_allowlisted() as ok")).rows[0].ok).toBe(true);
-    expect((await db.query("select display_name from public.profiles")).rows.length).toBe(3);
+    expect((await db.query("select display_name from public.profiles")).rows.length).toBe(4); // incl. the outsider made above
     await db.exec("reset role; select set_config('request.jwt.claim.sub', '', false);");
     expect(await as("outsider", "select public.is_allowlisted() as ok")).toEqual([{ ok: false }]); // gmail still out
     expect(await as("ana", "select open from public.pilot_stats()")).toEqual([{ open: true }]);

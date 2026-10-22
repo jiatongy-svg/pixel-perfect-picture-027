@@ -10,7 +10,7 @@ import { placeLabel } from "@/lib/places";
 import { todayLA } from "@/lib/dates";
 import { budgetText, whenText, whereText } from "@/lib/describe";
 import { dateFit, destinationFit } from "@/lib/feasibility";
-import { getOnboardedViewer, loadPeople, loadProposals, photoUrls } from "@/lib/data";
+import { getOnboardedViewer, loadProposals, photoUrls, proposalPeople } from "@/lib/data";
 import { ProposalActions } from "@/components/ProposalActions";
 import { TripView } from "@/components/TripView";
 import { Avatar, Badge, Card, Notice, PageHeader } from "@/components/ui";
@@ -31,10 +31,10 @@ export default async function ProposalPage({ params, searchParams }: { params: P
   const urls = await photoUrls(supabase, p.people.map((m) => m.photo_path));
 
   // Counter options come from everyone's CURRENT plans (what's still feasible).
-  const live = await loadPeople(supabase, p.people.map((m) => m.id));
-  const plans = live.map((x) => x.plan);
-  const options = live.length === p.people.length ? destinationFit(plans).common.slice(0, 30).map((c) => ({ id: c.key, name: placeLabel(c) })) : [];
-  const window = live.length === p.people.length ? dateFit(plans, today).overlap : null;
+  const live = await proposalPeople(supabase, p);
+  const plans = live?.map((x) => x.plan) ?? [];
+  const options = live ? destinationFit(plans).common.slice(0, 30).map((c) => ({ id: c.key, name: placeLabel(c) })) : [];
+  const window = live ? dateFit(plans, today).overlap : null;
   const trip = p.current.merged;
 
   return (

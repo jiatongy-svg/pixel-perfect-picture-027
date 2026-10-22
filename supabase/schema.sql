@@ -111,11 +111,13 @@ create policy "profiles: update own"
 
 
 -- ----------------------------------------------------------------------------
--- 3. Travel plans — ONE current plan per user (user_id is the primary key,
---    which is a unique constraint).
+-- 3. Travel plans — each student can save up to 5 plans (e.g. one for
+--    Thanksgiving, one for spring break). Each plan is matched on its own.
 -- ----------------------------------------------------------------------------
 create table public.travel_plans (
-  user_id uuid primary key references public.profiles(id) on delete cascade,
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  title text not null default '' check (char_length(title) <= 60), -- private, like notes
   timing_mode text not null check (timing_mode in ('break', 'weekends')),
   break_id text check (break_id in ('thanksgiving', 'winter', 'spring')),
   date_mode text check (date_mode in ('anytime', 'fixed', 'flex')),
@@ -150,6 +152,20 @@ create table public.travel_plans (
   check (bringing_car or seats_offered = 0)
 );
 alter table public.travel_plans enable row level security;
+create index travel_plans_user on public.travel_plans (user_id);
+
+-- At most 5 plans per student (keeps matching fast and lists readable).
+create function public.limit_plans_per_user()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if (select count(*) from public.travel_plans where user_id = new.user_id) >= 5 then
+    raise exception 'TOO_MANY_PLANS: you can save up to 5 plans';
+  end if;
+  return new;
+end;
+$$;
+create trigger plans_limit before insert on public.travel_plans for each row execute function public.limit_plans_per_user();
+
 
 -- You can read and write ONLY your own plan row here.
 create policy "plans: read own"
@@ -166,7 +182,7 @@ create policy "plans: delete own"
   on public.travel_plans for delete to authenticated
   using (user_id = auth.uid() and public.is_allowlisted());
 
--- Classmates see other plans through this view, which leaves out `notes`.
+-- Classmates see other plans through this view, which leaves out `notes` and `title`.
 -- Exactly these columns are shared for matching:
 --   timing (mode, break, date mode, preferred dates, flex, weekends, trip length),
 --   destinations + flexibility, budget range, vibes, car/seats, gear they'll bring.
@@ -174,7 +190,7 @@ create policy "plans: delete own"
 -- and only returns rows when the caller is allowlisted.
 create view public.plan_cards
 with (security_invoker = false) as
-  select user_id, timing_mode, break_id, date_mode, preferred_start, preferred_end, flex_days,
+  select id, user_id, timing_mode, break_id, date_mode, preferred_start, preferred_end, flex_days,
          weekends, trip_length_min, trip_length_max, destinations, destination_flex,
          budget_min, budget_max, vibes, bringing_car, seats_offered, bringing_gear, updated_at
   from public.travel_plans
@@ -185,7 +201,7 @@ grant select on public.plan_cards to authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 4. Passes — "not for me" on a match. Hides it for the passer only.
---    target_key = the other person's id, or a group's sorted ids "a,b,c".
+--    target_key = the other plan's id, or a group's sorted plan ids "a,b,c".
 -- ----------------------------------------------------------------------------
 create table public.match_passes (
   user_id uuid not null default auth.uid() references public.profiles(id) on delete cascade,
@@ -207,8 +223,10 @@ create policy "passes: delete own" on public.match_passes for delete to authenti
 -- ----------------------------------------------------------------------------
 create table public.proposals (
   id uuid primary key default gen_random_uuid(),
-  -- Members' ids sorted and joined by commas: the same group always gets the same key.
+  -- Members' user ids sorted and joined by commas (who is in it).
   member_key text not null,
+  -- The plans the proposal is about, sorted ids joined by commas.
+  plan_key text not null,
   size int not null check (size between 2 and 4),
   status text not null default 'pending' check (status in ('pending', 'confirmed', 'declined', 'superseded')),
   current_version int not null default 1 check (current_version >= 1),
@@ -217,8 +235,9 @@ create table public.proposals (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
--- Only ONE open (pending) proposal per group of people at a time.
-create unique index proposals_one_open_per_group on public.proposals (member_key) where status = 'pending';
+-- Only ONE open (pending) proposal per set of plans at a time. (The same
+-- people can have separate proposals for different plans, e.g. winter + spring.)
+create unique index proposals_one_open_per_plans on public.proposals (plan_key) where status = 'pending';
 
 create table public.proposal_members (
   proposal_id uuid not null references public.proposals(id) on delete cascade,
@@ -293,49 +312,55 @@ create policy "itineraries: members read" on public.confirmed_itineraries for se
 --   NOT_MEMBER / NOT_ALLOWED / BAD_INPUT
 -- ----------------------------------------------------------------------------
 
--- Create a proposal (version 1). The creator's acceptance of v1 is recorded,
--- and the app says so clearly on the button ("Propose & accept v1").
--- Only the server (service role) may call this, because the server computes the
--- merged itinerary. The server passes the verified signed-in user as p_actor.
--- If an open proposal for the same people already exists, its id is returned
+-- Create a proposal (version 1) between specific PLANS (one plan per person,
+-- 2–4 people). The creator's acceptance of v1 is recorded, and the app says so
+-- clearly on the button. Only the server (service role) may call this, because
+-- the server computes the merged itinerary; it passes the verified user as p_actor.
+-- If an open proposal for the same plans already exists, its id is returned
 -- instead of creating a duplicate (so double-clicks are harmless).
-create function public.create_proposal(p_actor uuid, p_members uuid[], p_snapshots jsonb, p_merged jsonb)
+create function public.create_proposal(p_actor uuid, p_plans uuid[], p_snapshots jsonb, p_merged jsonb)
 returns table (proposal_id uuid, created boolean)
 language plpgsql security definer set search_path = ''
 as $$
 declare
+  v_plans uuid[];
   v_members uuid[];
-  v_key text;
+  v_plan_key text;
   v_id uuid;
   v_ok int;
 begin
-  select array_agg(distinct m order by m) into v_members from unnest(p_members) as m;
-  if v_members is null or cardinality(v_members) not between 2 and 4 or cardinality(v_members) <> cardinality(p_members) then
-    raise exception 'BAD_INPUT: a proposal needs 2 to 4 different people';
+  select array_agg(distinct x order by x) into v_plans from unnest(p_plans) as x;
+  if v_plans is null or cardinality(v_plans) not between 2 and 4 or cardinality(v_plans) <> cardinality(p_plans) then
+    raise exception 'BAD_INPUT: a proposal needs 2 to 4 different plans';
+  end if;
+  -- The people behind those plans: one plan per person.
+  select array_agg(distinct t.user_id order by t.user_id) into v_members
+  from public.travel_plans t where t.id = any (v_plans);
+  if v_members is null or cardinality(v_members) <> cardinality(v_plans) then
+    raise exception 'BAD_INPUT: each person can bring only one of their plans';
   end if;
   if not (p_actor = any (v_members)) then
     raise exception 'NOT_MEMBER';
   end if;
-  -- Every member must be allowlisted, have a completed profile and a plan.
+  -- Every member must be allowed in and have a completed profile.
   select count(*) into v_ok
   from public.profiles p
   join auth.users u on u.id = p.id
-  join public.travel_plans t on t.user_id = p.id
   where p.id = any (v_members) and p.completed and public.email_allowed(u.email);
   if v_ok <> cardinality(v_members) then
-    raise exception 'NOT_ALLOWED: every member needs a completed profile and a saved plan';
+    raise exception 'NOT_ALLOWED: every member needs a completed profile';
   end if;
 
-  v_key := array_to_string(v_members, ',');
+  v_plan_key := array_to_string(v_plans, ',');
 
-  insert into public.proposals (member_key, size, created_by)
-  values (v_key, cardinality(v_members), p_actor)
-  on conflict (member_key) where status = 'pending' do nothing
+  insert into public.proposals (member_key, plan_key, size, created_by)
+  values (array_to_string(v_members, ','), v_plan_key, cardinality(v_members), p_actor)
+  on conflict (plan_key) where status = 'pending' do nothing
   returning id into v_id;
 
   if v_id is null then
-    -- Someone (maybe this same double-click) already opened one for this group.
-    select p.id into v_id from public.proposals p where p.member_key = v_key and p.status = 'pending';
+    -- Someone (maybe this same double-click) already opened one for these plans.
+    select p.id into v_id from public.proposals p where p.plan_key = v_plan_key and p.status = 'pending';
     return query select v_id, false;
     return;
   end if;

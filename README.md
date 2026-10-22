@@ -92,6 +92,8 @@ npm run rls-check  # security checks against the real Supabase project
 
 ## Changelog
 
+- **2026-10-22 (night)** Several plans per student (up to 5, "My plans"); each plan is matched on its own and proposals are tied to specific plans (`plan_key`), so the same people can have a winter and a spring proposal. Every Explore plan is clickable (`/explore/[planId]`) and shows a score for each of your plans with a breakdown; plans that don't line up show a "% fit" instead of "% match". Fixed: Explore reasons no longer include the classmate's name. Database: `migrations/004_multiple_plans.sql`.
+
 - **2026-10-22 (evening)** Explore page (all classmates' plans, anonymous, best match first); filters (when, vibe, max budget, destination) on Explore and Matches; matches grouped by Thanksgiving / Winter / Spring / Weekends; profile shows as a short summary after saving; destinations can be any city worldwide (Open-Meteo city search) plus popular quick picks, with "nearby" = within 250 km; destination photos (Wikipedia, credited) and Google Maps links, and optional MBTI (from Steven's prototype; MBTI never affects the score); green + cream palette. Database: `migrations/003_places_and_mbti.sql`.
 
 - **2026-10-22** Opened sign-in to every @usc.edu address (`allowed_domains` + `email_allowed()`, migration `002_open_to_usc.sql`). Email links are now scanner-safe (USC Outlook pre-opens links), and the 6-digit code is the main sign-in path. Email is sent through Brevo SMTP.

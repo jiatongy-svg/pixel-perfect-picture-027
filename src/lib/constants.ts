@@ -63,6 +63,8 @@ export const MAX_GROUP_SIZE = 4;
 // 4. Plan form limits (also enforced by the database, see supabase/schema.sql)
 // ---------------------------------------------------------------------------
 export const PLAN_LIMITS = {
+  maxPlans: 5, // per student (the database enforces this too)
+  maxTitle: 60,
   maxDestinations: 5,
   maxWeekends: 8,
   maxTripDays: 14,

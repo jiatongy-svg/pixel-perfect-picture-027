@@ -43,18 +43,21 @@ export type PairResult = {
   reasons: string[];
 };
 
-// Stable id for a set of people: sorted ids joined by commas.
-// The database uses the same format for proposals.member_key and passes.
+// Stable key for a set of ids (plans or people): sorted, joined by commas.
+// The database uses the same format for proposals.plan_key / member_key and passes.
 export const memberKey = (ids: string[]) => [...ids].sort().join(",");
 
 const money = (n: number) => `$${n.toLocaleString("en-US")}`;
 const listWords = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 
 // ---------------------------------------------------------------------------
-// Pair score, written from `me`'s point of view (reasons say "you" and their name).
+// Pair score, written from `me`'s point of view (reasons say "you" and their
+// name). anonymous: say "this classmate" instead of the name (Explore page).
 // ---------------------------------------------------------------------------
-export function scorePair(me: Person, them: Person, today: string): PairResult {
+export function scorePair(me: Person, them: Person, today: string, opts: { anonymous?: boolean } = {}): PairResult {
   const plans = [me.plan, them.plan];
+  const name = opts.anonymous ? "this classmate" : them.name;
+  const Name = opts.anonymous ? "This classmate" : them.name;
 
   // 1. Hard constraints
   const d = dateFit(plans, today);
@@ -86,8 +89,8 @@ export function scorePair(me: Person, them: Person, today: string): PairResult {
     const when = formatRange(d.overlap!);
     if (mine?.kind === "listed" && theirs?.kind === "listed") reasons.push(`You both want ${where} and overlap ${when}`);
     else {
-      if (mine?.kind === "listed") reasons.push(`${where} is on your list and works for ${them.name}`);
-      else if (theirs?.kind === "listed") reasons.push(`${them.name} wants ${where}, which fits your plan`);
+      if (mine?.kind === "listed") reasons.push(`${where} is on your list and works for ${name}`);
+      else if (theirs?.kind === "listed") reasons.push(`${Name} wants ${where}, which fits your plan`);
       else reasons.push(`You're both flexible on destination — ${where} fits you both`);
       reasons.push(`You can both travel ${when} (a ${d.days}-day trip fits)`);
     }
@@ -96,7 +99,7 @@ export function scorePair(me: Person, them: Person, today: string): PairResult {
   const sharedVibes = me.plan.vibes.filter((x) => them.plan.vibes.includes(x));
   if (sharedVibes.length) reasons.push(`You share: ${sharedVibes.map(vibeLabel).join(", ")}`);
   if (them.plan.bringing_car && !me.plan.bringing_car)
-    reasons.push(`${them.name} can bring a car${them.plan.seats_offered ? ` with ${them.plan.seats_offered} open ${them.plan.seats_offered === 1 ? "seat" : "seats"}` : ""}`);
+    reasons.push(`${Name} can bring a car${them.plan.seats_offered ? ` with ${them.plan.seats_offered} open ${them.plan.seats_offered === 1 ? "seat" : "seats"}` : ""}`);
 
   return { eligible: blockers.length === 0, blockers, score, fit, trip: d.trip, place: dest.best, parts, reasons: reasons.slice(0, 4) };
 }
@@ -110,19 +113,20 @@ export type MatchSummary = {
   considered: number;
 };
 
-// Top pair matches for `me` among `others` (already filtered to completed
-// profiles with a plan; `passedIds` are people `me` has passed on).
-export function findPairMatches(me: Person, others: Person[], passedIds: Set<string>, today: string, limit = MAX_RESULTS): MatchSummary {
+// Top pair matches for one of my plans (`me`) among classmates' plans.
+// `passed`: plan ids (or, from before multi-plan, user ids) this user passed on.
+// My own other plans are skipped.
+export function findPairMatches(me: Person, others: Person[], passed: Set<string>, today: string, limit = MAX_RESULTS): MatchSummary {
   const blockedBy: Record<Blocker, number> = { dates: 0, destination: 0, budget: 0, score: 0 };
   const pairs: PairMatch[] = [];
-  const pool = others.filter((o) => o.id !== me.id && !passedIds.has(o.id));
+  const pool = others.filter((o) => o.id !== me.id && !passed.has(o.plan.id) && !passed.has(o.id));
   for (const o of pool) {
     const r = scorePair(me, o, today);
     if (r.eligible) pairs.push({ person: o, score: r.score, reasons: r.reasons, trip: r.trip, place: r.place, category: tripCategory(r.trip) });
     else for (const bl of r.blockers) blockedBy[bl]++;
   }
   // Highest score first; ties broken by user id so the order never changes randomly.
-  pairs.sort((a, b) => b.score - a.score || (a.person.id < b.person.id ? -1 : 1));
+  pairs.sort((a, b) => b.score - a.score || (a.person.plan.id < b.person.plan.id ? -1 : 1));
   return { pairs: pairs.slice(0, limit), blockedBy, considered: pool.length };
 }
 
@@ -206,15 +210,17 @@ export function scoreGroup(group: Person[], today: string): { eligible: boolean;
   return { eligible: true, score, weakest, reasons, trip: d.trip, place: dest.best };
 }
 
-// passedKeys: group keys the user passed on. passedIds: people the user passed on
-// (passing on a person also hides groups that include them).
-export function findGroupMatches(me: Person, others: Person[], passedIds: Set<string>, passedKeys: Set<string>, today: string, limit = MAX_RESULTS): GroupMatch[] {
-  const pool = others.filter((o) => o.id !== me.id && !passedIds.has(o.id)).sort((a, b) => (a.id < b.id ? -1 : 1));
+// Groups of 3–4 for one of my plans: one plan per person. `passed`: plan ids,
+// group plan keys (and legacy user ids) this user passed on. Passing on a plan
+// also hides groups that include it.
+export function findGroupMatches(me: Person, others: Person[], passed: Set<string>, today: string, limit = MAX_RESULTS): GroupMatch[] {
+  const pool = others.filter((o) => o.id !== me.id && !passed.has(o.plan.id) && !passed.has(o.id)).sort((a, b) => (a.plan.id < b.plan.id ? -1 : 1));
   const out: GroupMatch[] = [];
   for (let size = MIN_GROUP_SIZE; size <= MAX_GROUP_SIZE; size++) {
     for (const combo of combinations(pool, size - 1)) {
-      const key = memberKey([me.id, ...combo.map((p) => p.id)]);
-      if (passedKeys.has(key)) continue;
+      if (new Set(combo.map((p) => p.id)).size !== combo.length) continue; // one plan per person
+      const key = memberKey([me.plan.id, ...combo.map((p) => p.plan.id)]);
+      if (passed.has(key)) continue;
       const r = scoreGroup([me, ...combo], today);
       if (r.eligible) out.push({ members: combo, key, score: r.score, weakestPair: r.weakest, reasons: r.reasons, trip: r.trip, place: r.place, category: tripCategory(r.trip) });
     }
@@ -222,4 +228,31 @@ export function findGroupMatches(me: Person, others: Person[], passedIds: Set<st
   // Highest group score, then the strongest weakest pair, then sorted ids.
   out.sort((a, b) => b.score - a.score || b.weakestPair - a.weakestPair || (a.key < b.key ? -1 : 1));
   return out.slice(0, limit);
+}
+
+// ---------------------------------------------------------------------------
+// Matches for ALL of the viewer's plans. A classmate's plan that fits several
+// of mine is listed once, against the plan it fits best.
+// ---------------------------------------------------------------------------
+export type MyPairMatch = PairMatch & { mine: Person };
+export function findAllPairMatches(mine: Person[], others: Person[], passed: Set<string>, today: string) {
+  const best = new Map<string, MyPairMatch>();
+  const blockedBy: Record<Blocker, number> = { dates: 0, destination: 0, budget: 0, score: 0 };
+  for (const me of mine) {
+    const r = findPairMatches(me, others, passed, today, Infinity);
+    for (const k of Object.keys(blockedBy) as Blocker[]) blockedBy[k] += r.blockedBy[k];
+    for (const m of r.pairs) {
+      const prev = best.get(m.person.plan.id);
+      if (!prev || m.score > prev.score) best.set(m.person.plan.id, { ...m, mine: me });
+    }
+  }
+  const pairs = [...best.values()].sort((a, b) => b.score - a.score || (a.person.plan.id < b.person.plan.id ? -1 : 1));
+  return { pairs, blockedBy };
+}
+
+export type MyGroupMatch = GroupMatch & { mine: Person };
+export function findAllGroupMatches(mine: Person[], others: Person[], passed: Set<string>, today: string): MyGroupMatch[] {
+  return mine
+    .flatMap((me) => findGroupMatches(me, others, passed, today, Infinity).map((g) => ({ ...g, mine: me })))
+    .sort((a, b) => b.score - a.score || b.weakestPair - a.weakestPair || (a.key < b.key ? -1 : 1));
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MIN_MATCH_SCORE } from "@/lib/constants";
 import { dateFit, planWindows, budgetFit, destinationFit } from "@/lib/feasibility";
-import { findGroupMatches, findPairMatches, memberKey, scorePair } from "@/lib/matching";
+import { findAllPairMatches, findGroupMatches, findPairMatches, memberKey, scorePair } from "@/lib/matching";
 import { upcomingFridays, formatRange } from "@/lib/dates";
 import { person, TODAY } from "./helpers";
 
@@ -119,9 +119,9 @@ describe("findPairMatches", () => {
 describe("group matching", () => {
   const me = person("a", "Ana");
   it("finds a group when everyone is compatible, with reasons", () => {
-    const groups = findGroupMatches(me, [person("b", "Ben"), person("c", "Cy")], new Set(), new Set(), TODAY);
+    const groups = findGroupMatches(me, [person("b", "Ben"), person("c", "Cy")], new Set(), TODAY);
     expect(groups).toHaveLength(1);
-    expect(groups[0].key).toBe(memberKey(["a", "b", "c"]));
+    expect(groups[0].key).toBe(memberKey(["plan-a", "plan-b", "plan-c"]));
     expect(groups[0].reasons).toContain("All three of you can travel Nov 25–28");
     expect(groups[0].reasons).toContain("Everyone listed Joshua Tree");
   });
@@ -132,16 +132,46 @@ describe("group matching", () => {
     const c = person("c", "Cy", { date_mode: "fixed", preferred_start: "2026-11-28", preferred_end: "2026-11-29" });
     expect(scorePair(a2, b, TODAY).eligible).toBe(true);
     expect(scorePair(b, c, TODAY).eligible).toBe(true);
-    expect(findGroupMatches(a2, [b, c], new Set(), new Set(), TODAY)).toHaveLength(0);
+    expect(findGroupMatches(a2, [b, c], new Set(), TODAY)).toHaveLength(0);
   });
   it("hides a passed group and groups with a passed person", () => {
     const others = [person("b", "Ben"), person("c", "Cy")];
-    expect(findGroupMatches(me, others, new Set(), new Set([memberKey(["a", "b", "c"])]), TODAY)).toHaveLength(0);
-    expect(findGroupMatches(me, others, new Set(["c"]), new Set(), TODAY)).toHaveLength(0);
+    expect(findGroupMatches(me, others, new Set([memberKey(["plan-a", "plan-b", "plan-c"])]), TODAY)).toHaveLength(0);
+    expect(findGroupMatches(me, others, new Set(["plan-c"]), TODAY)).toHaveLength(0);
   });
   it("breaks ties by weakest pair, then ids", () => {
     const others = [person("b", "B"), person("c", "C"), person("d", "D")];
-    const groups = findGroupMatches(me, others, new Set(), new Set(), TODAY);
-    expect(groups.map((g) => g.key)).toEqual(["a,b,c", "a,b,c,d", "a,b,d", "a,c,d"]);
+    const groups = findGroupMatches(me, others, new Set(), TODAY);
+    expect(groups.map((g) => g.key)).toEqual(["plan-a,plan-b,plan-c", "plan-a,plan-b,plan-c,plan-d", "plan-a,plan-b,plan-d", "plan-a,plan-c,plan-d"]);
+  });
+});
+
+describe("several plans per person", () => {
+  const withPlan = (id: string, name: string, planId: string, over = {}) => {
+    const p = person(id, name, over);
+    return { ...p, plan: { ...p.plan, id: planId } };
+  };
+  it("matches each of my plans and lists each classmate plan once, against my best plan", () => {
+    const mine = [withPlan("me", "Me", "m1"), withPlan("me", "Me", "m2", { break_id: "spring" })];
+    const others = [withPlan("b", "Ben", "b1"), withPlan("b", "Ben", "b2", { break_id: "spring" }), withPlan("c", "Cy", "c1", { break_id: "winter" })];
+    const r = findAllPairMatches(mine, others, new Set(), TODAY);
+    expect(r.pairs.map((p) => `${p.mine.plan.id}->${p.person.plan.id}`).sort()).toEqual(["m1->b1", "m2->b2"]);
+  });
+  it("never puts two plans of the same person in one group", () => {
+    const me = withPlan("me", "Me", "m1");
+    const groups = findGroupMatches(me, [withPlan("b", "Ben", "b1"), withPlan("b", "Ben", "b2"), withPlan("c", "Cy", "c1")], new Set(), TODAY);
+    expect(groups.every((g) => new Set(g.members.map((m) => m.id)).size === g.members.length)).toBe(true);
+  });
+  it("skips my own other plans and passed plans", () => {
+    const mine = [withPlan("me", "Me", "m1"), withPlan("me", "Me", "m2")];
+    const r = findAllPairMatches(mine, [withPlan("b", "Ben", "b1"), withPlan("c", "Cy", "c1")], new Set(["c1"]), TODAY);
+    expect(r.pairs.map((p) => p.person.plan.id)).toEqual(["b1"]);
+  });
+  it("anonymous reasons never contain the classmate's name", () => {
+    const me = person("a", "Ana", { destinations: ["joshua-tree"] });
+    const them = person("b", "Jamie Sun", { destinations: ["palm-springs", "joshua-tree"], bringing_car: true, seats_offered: 2 });
+    const r = scorePair(me, them, TODAY, { anonymous: true });
+    expect(r.reasons.join(" ")).not.toContain("Jamie");
+    expect(scorePair(me, them, TODAY).reasons.join(" ")).toContain("Jamie Sun");
   });
 });

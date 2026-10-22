@@ -10,7 +10,7 @@ const LINKS = [
   { href: "/matches", label: "Matches", Icon: Sparkles },
   { href: "/explore", label: "Explore", Icon: Compass },
   { href: "/proposals", label: "Proposals", Icon: Inbox },
-  { href: "/plan", label: "My plan", Icon: CalendarRange },
+  { href: "/plans", label: "My plans", Icon: CalendarRange },
   { href: "/profile", label: "Profile", Icon: UserRound },
 ];
 

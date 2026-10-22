@@ -6,9 +6,9 @@ import Link from "next/link";
 import { CalendarPlus, Hourglass, SearchX, Users } from "lucide-react";
 import { MAX_GROUP_SIZE, MAX_RESULTS } from "@/lib/constants";
 import { todayLA } from "@/lib/dates";
-import { getOnboardedViewer, loadPeople, photoUrls, pilotStats } from "@/lib/data";
+import { getOnboardedViewer, loadPeople, photoUrls, pilotStats, planName } from "@/lib/data";
 import { hasFilters, parseFilters, passes as passesFilters } from "@/lib/filters";
-import { CATEGORY_LABEL, findGroupMatches, findPairMatches, memberKey, type Blocker, type TripCategory } from "@/lib/matching";
+import { CATEGORY_LABEL, findAllGroupMatches, findAllPairMatches, memberKey, type Blocker, type TripCategory } from "@/lib/matching";
 import { FilterBar } from "@/components/FilterBar";
 import { MatchCard } from "@/components/MatchCard";
 import { ClearPassesButton, RefreshButton } from "@/components/MatchActions";
@@ -34,20 +34,20 @@ export default async function MatchesPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const view = sp.view === "groups" ? "groups" : "pairs";
   const filters = parseFilters(sp);
-  const { supabase, userId, plan } = await getOnboardedViewer();
+  const { supabase, userId, plans: myPlans } = await getOnboardedViewer();
   const today = todayLA();
 
   const [people, stats, { data: passes }, { data: open }] = await Promise.all([
     loadPeople(supabase),
     pilotStats(supabase),
     supabase.from("match_passes").select("target_key"),
-    supabase.from("proposals").select("id, member_key").eq("status", "pending"),
+    supabase.from("proposals").select("id, plan_key").eq("status", "pending"),
   ]);
-  const me = people.find((p) => p.id === userId);
+  const mine = people.filter((p) => p.id === userId); // one entry per plan of mine
   const others = people.filter((p) => p.id !== userId);
   const passKeys = new Set((passes ?? []).map((p) => p.target_key as string));
-  const passedIds = new Set([...passKeys].filter((k) => !k.includes(",")));
-  const openByKey = new Map((open ?? []).map((p) => [p.member_key as string, p.id as string]));
+  const openByKey = new Map((open ?? []).map((p) => [p.plan_key as string, p.id as string]));
+  const nameOf = new Map(myPlans.map((p) => [p.id, planName(p)]));
 
   const header = (
     <PageHeader
@@ -58,11 +58,11 @@ export default async function MatchesPage({ searchParams }: { searchParams: Prom
   );
 
   // Empty state (c): no plan saved yet.
-  if (!plan || !me) {
+  if (!mine.length) {
     return (
       <>
         {header}
-        <EmptyState icon={<CalendarPlus />} title="Add your plan to see matches" action={<Link href="/plan" className="inline-flex h-11 items-center rounded-md bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover">Add my plan</Link>}>
+        <EmptyState icon={<CalendarPlus />} title="Add your plan to see matches" action={<Link href="/plans/new" className="inline-flex h-11 items-center rounded-md bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover">Add a plan</Link>}>
           Pick a long break or a few weekends. You don't need a destination yet — choose “I'm open to anywhere”.
         </EmptyState>
       </>
@@ -75,16 +75,16 @@ export default async function MatchesPage({ searchParams }: { searchParams: Prom
       <>
         {header}
         <EmptyState icon={<Hourglass />} title={stats.open ? "Waiting on classmates — you're the first one here" : `Waiting on classmates — ${stats.joined} of ${stats.total} have joined`}>
-          Your plan is saved. Matches appear here as soon as another pilot classmate saves theirs. Nothing to do but check back.
+          Your plan is saved. Matches appear here as soon as a classmate saves one. Nothing to do but check back.
         </EmptyState>
       </>
     );
   }
 
   // All eligible matches, then the filters, then up to MAX_RESULTS per category.
-  const pairs = findPairMatches(me, others, passedIds, today, Infinity);
+  const pairs = findAllPairMatches(mine, others, passKeys, today);
   const shownPairs = pairs.pairs.filter((m) => passesFilters(m.person.plan, filters, m.category));
-  const groups = findGroupMatches(me, others, passedIds, passKeys, today, Infinity).filter((g) =>
+  const groups = findAllGroupMatches(mine, others, passKeys, today).filter((g) =>
     g.members.every((p) => passesFilters(p.plan, { ...filters, q: "" }, g.category)) && (!filters.q || g.members.some((p) => passesFilters(p.plan, filters, g.category))),
   );
   const urls = await photoUrls(supabase, people.map((p) => p.profile.photo_path));
@@ -107,7 +107,7 @@ export default async function MatchesPage({ searchParams }: { searchParams: Prom
     hasFilters(filters) ? (
       <EmptyState icon={<SearchX />} title="No matches with these filters">You have matches, but none fit these filters. Try another time or vibe, or clear the filters.</EmptyState>
     ) : <EmptyState icon={<SearchX />} title={view === "pairs" ? "No compatible classmates right now" : "No groups line up right now"}
-      action={<div className="flex flex-wrap justify-center gap-2"><Link href="/plan" className="inline-flex h-11 items-center rounded-md bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover">Add flexibility to my plan</Link>{passKeys.size > 0 && <ClearPassesButton />}</div>}>
+      action={<div className="flex flex-wrap justify-center gap-2"><Link href="/plans" className="inline-flex h-11 items-center rounded-md bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover">Add flexibility to my plans</Link>{passKeys.size > 0 && <ClearPassesButton />}</div>}>
       {topBlockers.length > 0 ? (
         <>Classmates mostly have {topBlockers.map(([b]) => BLOCKER_TEXT[b]).join(", or ")}. </>
       ) : view === "groups" ? (
@@ -130,9 +130,10 @@ export default async function MatchesPage({ searchParams }: { searchParams: Prom
               <h2 id={`cat-${sec.category}`} className="mb-3 text-lg font-semibold">{CATEGORY_LABEL[sec.category]} <span className="font-normal text-muted">({sec.items.length})</span></h2>
               <ul className="grid gap-4 md:grid-cols-2">
                 {sec.items.map((m, i) => (
-                  <li key={m.person.id} className="enter min-w-0" style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }}>
+                  <li key={m.person.plan.id} className="enter min-w-0" style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }}>
                     <MatchCard kind="pair" score={m.score} reasons={m.reasons} place={m.place} members={[{ person: m.person, photo: photo(m.person.profile.photo_path) }]}
-                      targetKey={m.person.id} openProposalId={openByKey.get(memberKey([userId, m.person.id])) ?? null} today={today} viewerMbti={me.profile.mbti} />
+                      myPlanId={m.mine.plan.id} myPlanName={myPlans.length > 1 ? nameOf.get(m.mine.plan.id) ?? null : null}
+                      targetKey={m.person.plan.id} openProposalId={openByKey.get(memberKey([m.mine.plan.id, m.person.plan.id])) ?? null} today={today} viewerMbti={m.mine.profile.mbti} />
                   </li>
                 ))}
               </ul>
@@ -147,7 +148,8 @@ export default async function MatchesPage({ searchParams }: { searchParams: Prom
               {sec.items.map((g, i) => (
                 <li key={g.key} className="enter min-w-0" style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }}>
                   <MatchCard kind="group" score={g.score} reasons={g.reasons} place={g.place} members={g.members.map((p) => ({ person: p, photo: photo(p.profile.photo_path) }))}
-                    targetKey={g.key} openProposalId={openByKey.get(g.key) ?? null} today={today} viewerMbti={me.profile.mbti} />
+                    myPlanId={g.mine.plan.id} myPlanName={myPlans.length > 1 ? nameOf.get(g.mine.plan.id) ?? null : null}
+                    targetKey={g.key} openProposalId={openByKey.get(g.key) ?? null} today={today} viewerMbti={g.mine.profile.mbti} />
                 </li>
               ))}
             </ul>

@@ -23,13 +23,15 @@ type Props = {
   openProposalId: string | null;
   today: string;
   place: Place | null; // best shared destination, for the photo
+  myPlanId: string; // which of my plans this match is for
+  myPlanName: string | null; // shown when I have more than one plan
   viewerMbti: Mbti | null;
 };
 
 // Shared MBTI letters (0–4). Just for fun: it never affects the score.
 const sharedLetters = (a: string, b: string) => [...a].filter((ch, i) => ch === b[i]).length;
 
-export function MatchCard({ kind, score, reasons, members, targetKey, openProposalId, today, place, viewerMbti }: Props) {
+export function MatchCard({ kind, score, reasons, members, targetKey, openProposalId, today, place, viewerMbti, myPlanId, myPlanName }: Props) {
   const [proposing, startPropose] = useTransition();
   const [passing, startPass] = useTransition();
   const [error, setError] = useState<{ text: string; conflicts?: string[] } | null>(null);
@@ -39,7 +41,7 @@ export function MatchCard({ kind, score, reasons, members, targetKey, openPropos
   function propose() {
     setError(null);
     startPropose(async () => {
-      const r = await proposeTrip(members.map((m) => m.person.id));
+      const r = await proposeTrip(myPlanId, members.map((m) => m.person.plan.id));
       // On success the server redirects to the new proposal.
       if (r && !r.ok) setError({ text: r.error, conflicts: r.conflicts });
     });
@@ -55,6 +57,7 @@ export function MatchCard({ kind, score, reasons, members, targetKey, openPropos
   return (
     <Card as="article" className="flex h-full flex-col gap-4">
       {place && <DestinationImage place={place} />}
+      {myPlanName && <p className="-mb-2 text-xs font-medium text-accent-text">For your plan: {myPlanName}</p>}
       <header className="flex items-start gap-3">
         {kind === "pair" ? (
           <Avatar name={members[0].person.name} url={members[0].photo} />

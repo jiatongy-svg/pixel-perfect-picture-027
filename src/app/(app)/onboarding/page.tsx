@@ -10,7 +10,7 @@ import { PageHeader, cx } from "@/components/ui";
 export const dynamic = "force-dynamic";
 
 export default async function Onboarding({ searchParams }: { searchParams: Promise<{ step?: string }> }) {
-  const { supabase, userId, profile, plan } = await getViewer();
+  const { supabase, userId, profile } = await getViewer();
   const step = (await searchParams).step === "plan" && profile?.completed ? "plan" : "profile";
   const urls = await photoUrls(supabase, [profile?.photo_path ?? null]);
 
@@ -32,7 +32,7 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
           <PageHeader title="What's your next trip?" subtitle={
             <>One plan at a time. Don't have a destination yet? Just pick when you're free. <Link href="/matches" className="font-medium text-accent-text underline-offset-4 hover:underline">Skip for now</Link></>
           } />
-          <PlanForm initial={plan} profile={profile!} fridays={upcomingFridays(todayLA(), PLAN_LIMITS.weekendHorizonDays)} next="/matches" />
+          <PlanForm initial={null} profile={profile!} fridays={upcomingFridays(todayLA(), PLAN_LIMITS.weekendHorizonDays)} next="/matches" />
         </>
       )}
     </div>

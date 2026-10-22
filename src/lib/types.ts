@@ -31,10 +31,12 @@ export type Mbti = (typeof MBTI_TYPES)[number];
 export type DateMode = "anytime" | "fixed" | "flex";
 export type DestinationFlex = "fixed" | "open_to_nearby" | "open";
 
-// One row of `travel_plans` — the student's ONE current trip plan.
-// `notes` is private to the owner and is never shown to classmates.
+// One row of `travel_plans` — one of the student's trip plans (up to 5).
+// `title` and `notes` are private to the owner and never shown to classmates.
 export type Plan = {
+  id: string;
   user_id: string;
+  title: string;
   timing_mode: "break" | "weekends";
   break_id: BreakId | null;
   date_mode: DateMode | null; // only for timing_mode = "break"
@@ -56,10 +58,11 @@ export type Plan = {
   updated_at?: string;
 };
 
-// The plan fields classmates are allowed to see (everything except notes).
-export type PublicPlan = Omit<Plan, "notes">;
+// The plan fields classmates are allowed to see (everything except title and notes).
+export type PublicPlan = Omit<Plan, "notes" | "title">;
 
-// A student as the matcher sees them.
+// A student WITH ONE OF THEIR PLANS, as the matcher sees them. Someone with
+// three plans appears as three Persons (same id, different plan.id).
 export type Person = {
   id: string;
   name: string;

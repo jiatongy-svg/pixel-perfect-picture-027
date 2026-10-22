@@ -64,6 +64,7 @@ export function planSchema(today: string) {
   const allowedFridays = new Set(upcomingFridays(today, PLAN_LIMITS.weekendHorizonDays));
   return z
     .object({
+      title: z.string().trim().max(PLAN_LIMITS.maxTitle, `Keep the name under ${PLAN_LIMITS.maxTitle} characters`).default(""),
       timing_mode: z.enum(["break", "weekends"], { message: "Choose a long break or weekends" }),
       break_id: z.enum(BREAK_IDS).nullable(),
       date_mode: z.enum(["anytime", "fixed", "flex"]).nullable(),

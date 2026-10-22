@@ -61,7 +61,7 @@ export function DestinationImage({ place, className }: { place: Place; className
           {/* eslint-disable-next-line @next/next/no-img-element -- remote Wikimedia thumbnail */}
           <img src={photo.url} alt={`View of ${placeLabel(place)}`} loading="lazy" onError={() => setPhoto(null)} className="h-full w-full object-cover" />
           <a href={`https://commons.wikimedia.org/wiki/File:${encodeURIComponent(photo.file)}`} target="_blank" rel="noopener noreferrer"
-            className="absolute right-1.5 bottom-1.5 rounded-sm bg-surface-raised/90 px-1.5 py-0.5 text-[0.6875rem] text-text">Photo source</a>
+            className="absolute right-1.5 bottom-1.5 z-10 rounded-sm bg-surface-raised/90 px-1.5 py-0.5 text-[0.6875rem] text-text">Photo source</a>
         </>
       ) : photo === null ? (
         <div className="flex h-full items-center justify-center gap-2 px-4 text-center text-sm text-muted">
@@ -69,7 +69,7 @@ export function DestinationImage({ place, className }: { place: Place; className
         </div>
       ) : null}
       <a href={mapUrl(place)} target="_blank" rel="noopener noreferrer"
-        className="absolute top-1.5 right-1.5 inline-flex items-center gap-1 rounded-sm bg-surface-raised/90 px-2 py-1 text-xs font-medium text-accent-text shadow-sm hover:underline">
+        className="absolute top-1.5 right-1.5 z-10 inline-flex items-center gap-1 rounded-sm bg-surface-raised/90 px-2 py-1 text-xs font-medium text-accent-text shadow-sm hover:underline">
         <MapPin aria-hidden className="size-3.5" /> Google Maps
       </a>
     </div>

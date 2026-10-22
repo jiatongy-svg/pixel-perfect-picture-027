@@ -13,7 +13,7 @@ export type Supabase = Awaited<ReturnType<typeof createClient>>;
 
 // The plan columns classmates may see (matches the plan_cards view).
 export const PUBLIC_PLAN_COLUMNS =
-  "user_id, timing_mode, break_id, date_mode, preferred_start, preferred_end, flex_days, weekends, trip_length_min, trip_length_max, destinations, destination_flex, budget_min, budget_max, vibes, bringing_car, seats_offered, bringing_gear, updated_at";
+  "id, user_id, timing_mode, break_id, date_mode, preferred_start, preferred_end, flex_days, weekends, trip_length_min, trip_length_max, destinations, destination_flex, budget_min, budget_max, vibes, bringing_car, seats_offered, bringing_gear, updated_at";
 
 // ---------------------------------------------------------------------------
 // Who is signed in? Redirects away if nobody is, or if they're not on the list.
@@ -27,11 +27,12 @@ export async function getViewer() {
   const { data: allowed } = await supabase.rpc("is_allowlisted");
   if (!allowed) redirect("/auth/signout?reason=private");
 
-  const [{ data: profile }, { data: plan }] = await Promise.all([
+  const [{ data: profile }, { data: plans }] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", data.user.id).maybeSingle(),
-    supabase.from("travel_plans").select("*").eq("user_id", data.user.id).maybeSingle(),
+    supabase.from("travel_plans").select("*").eq("user_id", data.user.id).order("updated_at", { ascending: false }),
   ]);
-  return { supabase, userId: data.user.id, profile: profile as Profile | null, plan: plan as Plan | null };
+  const mine = ((plans ?? []) as Plan[]).map((p) => ({ ...p, destinations: toPlaces(p.destinations) }));
+  return { supabase, userId: data.user.id, profile: profile as Profile | null, plans: mine };
 }
 
 // Pages that need a finished profile send new users to onboarding first.
@@ -62,20 +63,31 @@ export function toPerson(profile: Profile, plan: PublicPlan): Person {
   };
 }
 
-// Everyone with a completed profile AND a saved plan (including the viewer).
+// One entry per (student, plan) for everyone with a completed profile —
+// including the viewer's own plans. Optionally only some users or some plans.
 // Only real allowlisted users exist in this database — there are no demo users.
-export async function loadPeople(supabase: Supabase, onlyIds?: string[]) {
+export async function loadPeople(supabase: Supabase, only?: { userIds?: string[]; planIds?: string[] }) {
   let profilesQ = supabase.from("profiles").select("*").eq("completed", true);
-  let plansQ = supabase.from("plan_cards").select(PUBLIC_PLAN_COLUMNS);
-  if (onlyIds) {
-    profilesQ = profilesQ.in("id", onlyIds);
-    plansQ = plansQ.in("user_id", onlyIds);
+  let plansQ = supabase.from("plan_cards").select(PUBLIC_PLAN_COLUMNS).order("updated_at", { ascending: false });
+  if (only?.userIds) {
+    profilesQ = profilesQ.in("id", only.userIds);
+    plansQ = plansQ.in("user_id", only.userIds);
   }
+  if (only?.planIds) plansQ = plansQ.in("id", only.planIds);
   const [{ data: profiles, error: e1 }, { data: plans, error: e2 }] = await Promise.all([profilesQ, plansQ]);
   if (e1 || e2) throw new Error("Couldn't load classmates' plans.");
-  const planBy = new Map((plans as PublicPlan[]).map((p) => [p.user_id, p]));
-  return (profiles as Profile[]).filter((p) => planBy.has(p.id)).map((p) => toPerson(p, planBy.get(p.id)!));
+  const profileBy = new Map((profiles as Profile[]).map((p) => [p.id, p]));
+  return (plans as PublicPlan[]).filter((pl) => profileBy.has(pl.user_id)).map((pl) => toPerson(profileBy.get(pl.user_id)!, pl));
 }
+
+// A plan's display name: its own title, or "Thanksgiving · Joshua Tree".
+export function planName(plan: Pick<Plan, "title" | "timing_mode" | "break_id" | "destinations">): string {
+  if (plan.title?.trim()) return plan.title.trim();
+  const when = plan.timing_mode === "weekends" ? "Weekends" : BREAK_SHORT[plan.break_id ?? ""] ?? "Break";
+  const where = toPlaces(plan.destinations)[0]?.name ?? "Anywhere";
+  return `${when} · ${where}`;
+}
+const BREAK_SHORT: Record<string, string> = { thanksgiving: "Thanksgiving", winter: "Winter break", spring: "Spring break" };
 
 // Short-lived signed URLs for profile photos (the bucket is private).
 export async function photoUrls(supabase: Supabase, paths: (string | null)[]): Promise<Record<string, string>> {
@@ -150,3 +162,18 @@ export async function loadProposals(supabase: Supabase, onlyId?: string) {
   });
 }
 export type LoadedProposal = Awaited<ReturnType<typeof loadProposals>>[number];
+
+// The plans a proposal is about, as they are NOW (for countering). The plan ids
+// come from the current version's snapshots; proposals made before students
+// could have several plans fall back to each member's most recent plan.
+// Returns null if any of those plans was deleted.
+export async function proposalPeople(supabase: Supabase, p: LoadedProposal): Promise<Person[] | null> {
+  const planIds = p.current.snapshots.map((s) => s.plan?.id).filter((x): x is string => !!x);
+  if (planIds.length === p.people.length) {
+    const found = await loadPeople(supabase, { planIds });
+    return found.length === planIds.length ? found : null;
+  }
+  const byUser = await loadPeople(supabase, { userIds: p.people.map((m) => m.id) });
+  const firstEach = p.people.map((m) => byUser.find((x) => x.id === m.id));
+  return firstEach.every(Boolean) ? (firstEach as Person[]) : null;
+}

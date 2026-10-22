@@ -16,6 +16,7 @@ export function person(id: string, name: string, overrides: PlanOverrides = {}):
     msbaYear: "1st",
     profile: { has_car: false, car_seats: 0, equipment: [], travel_experience: "some", pace: "balanced", schedule: "flexible", lodging_prefs: [], bio: "", photo_path: null, mbti: null },
     plan: {
+      id: `plan-${id}`,
       user_id: id,
       timing_mode: "break",
       break_id: "thanksgiving",

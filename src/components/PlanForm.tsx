@@ -22,10 +22,10 @@ import { addDays, formatRange } from "@/lib/dates";
 import type { DestinationFlex, Plan, Profile } from "@/lib/types";
 import { Button, Card, Chip, Field, Group, Notice, OptionCard, cx, inputBase, inputClass } from "@/components/ui";
 
-type Draft = Omit<Plan, "user_id" | "updated_at" | "notes"> & { notes: string };
+type Draft = Omit<Plan, "id" | "user_id" | "updated_at" | "notes"> & { notes: string };
 
 const DEFAULT: Draft = {
-  timing_mode: "break", break_id: null, date_mode: "anytime", preferred_start: null, preferred_end: null, flex_days: 2, weekends: [],
+  title: "", timing_mode: "break", break_id: null, date_mode: "anytime", preferred_start: null, preferred_end: null, flex_days: 2, weekends: [],
   trip_length_min: 3, trip_length_max: 4, destinations: [], destination_flex: "open_to_nearby", budget_min: 200, budget_max: 600,
   vibes: [], bringing_car: false, seats_offered: 0, bringing_gear: [], notes: "",
 };
@@ -40,9 +40,10 @@ type Props = {
   initial: Plan | null;
   profile: Pick<Profile, "has_car" | "car_seats" | "equipment">;
   fridays: string[]; // upcoming Fridays the student may pick
-  next?: string;
+  next?: string; // where to go after saving (default: the My plans list)
 };
 
+// `initial` with an id = editing that plan; null = creating a new plan.
 export function PlanForm({ initial, profile, fridays, next }: Props) {
   const router = useRouter();
   const [d, setD] = useState<Draft>(() =>
@@ -65,11 +66,10 @@ export function PlanForm({ initial, profile, fridays, next }: Props) {
   function submit() {
     setResult(null);
     startTransition(async () => {
-      const r = await savePlan({
-        ...d,
-        trip_length_min: Math.min(d.trip_length_min, maxLen),
-        trip_length_max: Math.min(d.trip_length_max, maxLen),
-      });
+      const r = await savePlan(
+        { ...d, trip_length_min: Math.min(d.trip_length_min, maxLen), trip_length_max: Math.min(d.trip_length_max, maxLen) },
+        initial?.id,
+      );
       if (!r.ok) {
         setErrors(r.fields ?? {});
         setResult({ tone: "error", text: r.error });
@@ -79,17 +79,22 @@ export function PlanForm({ initial, profile, fridays, next }: Props) {
         return;
       }
       setErrors({});
-      if (next) router.push(next);
-      else {
-        setResult({ tone: "success", text: "Plan saved. Matches now use your latest plan." });
-        router.refresh();
-      }
+      router.push(next ?? "/plans?saved=1");
+      router.refresh();
     });
   }
   const err = (k: string) => errors[k] || undefined;
 
   return (
     <form className="flex flex-col gap-5" onSubmit={(e) => { e.preventDefault(); submit(); }} noValidate>
+      {/* 0. NAME ------------------------------------------------------------ */}
+      <Card>
+        <Field id="title" label="Plan name" optional hint="Only you see this. Leave it blank and we'll name it from the dates and place." error={err("title")}>
+          <input id="title" className={inputClass} maxLength={PLAN_LIMITS.maxTitle} value={d.title} placeholder="Thanksgiving desert trip"
+            onChange={(e) => set("title", e.target.value)} />
+        </Field>
+      </Card>
+
       {/* 1. WHEN ------------------------------------------------------------ */}
       <Card>
         <h2 className="mb-4 text-lg font-semibold">When can you go?</h2>
@@ -283,7 +288,7 @@ export function PlanForm({ initial, profile, fridays, next }: Props) {
 
       {result && <Notice tone={result.tone}>{result.text}</Notice>}
       <div className="flex justify-end">
-        <Button type="submit" loading={pending} className="w-full sm:w-auto">{next ? "Save plan and see matches" : "Save plan"}</Button>
+        <Button type="submit" loading={pending} className="w-full sm:w-auto">{next ? "Save plan and see matches" : initial ? "Save changes" : "Save plan"}</Button>
       </div>
     </form>
   );

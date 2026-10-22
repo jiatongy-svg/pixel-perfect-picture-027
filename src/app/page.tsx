@@ -5,8 +5,8 @@ import { getViewer } from "@/lib/data";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const { profile, plan } = await getViewer();
+  const { profile, plans } = await getViewer();
   if (!profile?.completed) redirect("/onboarding");
-  if (!plan) redirect("/plan");
+  if (!plans.length) redirect("/plans/new");
   redirect("/matches");
 }
