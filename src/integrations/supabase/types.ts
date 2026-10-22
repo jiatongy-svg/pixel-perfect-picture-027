@@ -14,7 +14,102 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      proposals: {
+        Row: {
+          created_at: string
+          id: string
+          match_profile_id: string
+          merged: Json
+          source: string
+          status: string
+          updated_at: string
+          user_profile_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          match_profile_id: string
+          merged: Json
+          source?: string
+          status?: string
+          updated_at?: string
+          user_profile_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          match_profile_id?: string
+          merged?: Json
+          source?: string
+          status?: string
+          updated_at?: string
+          user_profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposals_match_profile_id_fkey"
+            columns: ["match_profile_id"]
+            isOneToOne: false
+            referencedRelation: "trip_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposals_user_profile_id_fkey"
+            columns: ["user_profile_id"]
+            isOneToOne: false
+            referencedRelation: "trip_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trip_profiles: {
+        Row: {
+          break_id: string
+          budget: string
+          created_at: string
+          destinations: string[]
+          email: string
+          end_date: string
+          first_name: string
+          gear: string[]
+          id: string
+          is_seed: boolean
+          msba_year: string
+          start_date: string
+          vibes: string[]
+        }
+        Insert: {
+          break_id: string
+          budget: string
+          created_at?: string
+          destinations?: string[]
+          email: string
+          end_date: string
+          first_name: string
+          gear?: string[]
+          id?: string
+          is_seed?: boolean
+          msba_year?: string
+          start_date: string
+          vibes?: string[]
+        }
+        Update: {
+          break_id?: string
+          budget?: string
+          created_at?: string
+          destinations?: string[]
+          email?: string
+          end_date?: string
+          first_name?: string
+          gear?: string[]
+          id?: string
+          is_seed?: boolean
+          msba_year?: string
+          start_date?: string
+          vibes?: string[]
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
