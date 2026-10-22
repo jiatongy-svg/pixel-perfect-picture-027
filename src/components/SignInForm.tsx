@@ -12,7 +12,7 @@ import { sendSignInEmail, verifySignInCode } from "@/app/actions";
 import { Button, Field, Notice, inputClass } from "@/components/ui";
 
 const LINK_ERRORS: Record<string, string> = {
-  link: "That sign-in link has expired or was already used. Request a new code below.",
+  link: "That sign-in link didn't work. It may have expired, been used already, or been opened in a different browser. Request a new one below and open it in this browser.",
 };
 
 export function SignInForm({ initialError }: { initialError?: string }) {
@@ -47,7 +47,10 @@ export function SignInForm({ initialError }: { initialError?: string }) {
     startTransition(async () => {
       const r = await verifySignInCode(email, code);
       // On success the server redirects; we only get here on failure.
-      if (r && !r.ok) r.error === "PRIVATE" ? setStep("private") : setError(r.error);
+      if (r && !r.ok) {
+        if (r.error === "PRIVATE") setStep("private");
+        else setError(r.error);
+      }
     });
   }
 
@@ -72,7 +75,8 @@ export function SignInForm({ initialError }: { initialError?: string }) {
         <div>
           <h2 className="text-xl font-semibold">Check your inbox</h2>
           <p className="mt-1 break-words text-muted">
-            We sent a sign-in code to <span className="font-medium text-text">{email}</span>. Type it here, or tap the link in the email on this device.
+            We sent a sign-in code to <span className="font-medium text-text">{email}</span>. Type it here, or tap the link in the email.
+            Not there in a minute? Check Junk and the “Other” tab.
           </p>
         </div>
         <Field id="code" label="Sign-in code" error={error ?? undefined}>
@@ -87,7 +91,7 @@ export function SignInForm({ initialError }: { initialError?: string }) {
             Use a different email
           </button>
           <Button type="button" variant="ghost" size="sm" disabled={cooldown > 0 || pending} onClick={send}>
-            {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
+            {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend email"}
           </Button>
         </div>
       </form>

@@ -12,7 +12,7 @@
 // ============================================================================
 import { createClient } from "@supabase/supabase-js";
 
-const EXPECTED = 6; // the pilot size; change if the pilot grows
+const MAX_PILOT = 6; // the pilot size; you can start with fewer and add people later
 
 function mask(email: string) {
   const [name, domain] = email.split("@");
@@ -31,7 +31,7 @@ async function main() {
   const emails = [...new Set(raw.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean))];
   const bad = emails.filter((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
   if (bad.length) throw new Error(`These don't look like emails: ${bad.map(mask).join(", ")}`);
-  if (emails.length !== EXPECTED) throw new Error(`PILOT_ALLOWLIST has ${emails.length} emails; expected exactly ${EXPECTED}.`);
+  if (emails.length === 0 || emails.length > MAX_PILOT) throw new Error(`PILOT_ALLOWLIST has ${emails.length} emails; use 1 to ${MAX_PILOT}.`);
   const nonUsc = emails.filter((e) => !e.endsWith("@usc.edu"));
   if (nonUsc.length) console.warn(`Note: ${nonUsc.length} email(s) are not @usc.edu: ${nonUsc.map(mask).join(", ")}`);
 

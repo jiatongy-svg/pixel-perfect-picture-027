@@ -33,7 +33,13 @@ You'll need about an hour, a laptop, and:
 2. Go to **Authentication → URL Configuration**.
    - **Site URL:** `http://localhost:3000` for now. You'll change it to the Vercel URL in step 7.
    - **Redirect URLs:** add `http://localhost:3000/**`. You'll add the Vercel one in step 7.
-3. Go to **Authentication → Emails → Templates → Magic Link**. Replace the message body with:
+3. **Set up custom SMTP first.** Supabase only lets you edit email templates once custom SMTP is on, and its built-in sender allows just a few emails an hour. We use **Brevo** (free, 300 emails/day):
+   - Sign up at brevo.com. A @usc.edu address works for the account itself.
+   - In Brevo, go to **Senders** and add a sender whose address is **not** @usc.edu (for example a 163, Gmail or Outlook address), then verify it. Sending "as" @usc.edu from Brevo gets silently quarantined by USC's mail filter.
+   - In Brevo, go to **SMTP & API → SMTP**, note the **Login** (`…@smtp-brevo.com`), and click **Generate a new SMTP key**.
+   - In Supabase, go to **Authentication → Emails → Set up SMTP** and fill in: sender email = the verified non-USC address, sender name `TripMatch`, host `smtp-relay.brevo.com`, port `587`, username = the Brevo Login, password = the SMTP key.
+   - Later, for a full-cohort launch, buy a domain and authenticate it in Brevo so emails reliably reach the inbox.
+4. Go to **Authentication → Emails → Magic Link**. Set the subject to `Your TripMatch sign-in code`, switch the body to **Source**, and replace it with the contents of `supabase/email-template.html`:
 
    ```html
    <h2>Your TripMatch sign-in code</h2>
@@ -43,11 +49,9 @@ You'll need about an hour, a laptop, and:
    <p>If you didn't ask for this, you can ignore it.</p>
    ```
 
-   Then click **Save**. Students can type the code on any device, or tap the link on the device where they read the email.
+   Then scroll down and click **Save changes**. Students type the code on any device. If they tap the link instead, they land on a "Finish signing in" page with a button. That extra step is deliberate: USC's Outlook "Safe Links" opens every link to scan it, which would otherwise use up the one-time link before the student clicks it.
 
 **How to know it worked:** "Allow new users to sign up" shows as off, and the template preview shows `{{ .Token }}`.
-
-> **Email limits:** Supabase's built-in email sender is only meant for testing. It allows just a few emails per hour for the whole project. That's usually enough for 6 people signing in once, but if students see "Too many sign-in emails", set up custom SMTP: **Authentication → Emails → SMTP Settings**. A free Resend account works well.
 
 ## 3. Create the database tables and security rules
 
@@ -156,6 +160,8 @@ What they'll see on first login:
 
 | What you see | Likely cause | Fix |
 |---|---|---|
+| Brevo says "Delivered" but nothing arrives at @usc.edu | Sender address is @usc.edu (USC quarantines it) | Use a non-USC verified sender in Brevo + Supabase SMTP settings |
+| Link says expired right away | Outlook pre-scanned it | Type the code from the email instead |
 | The email link opens `localhost` on your phone | Supabase **Site URL** is still localhost | Step 7.6: set the Site URL to the Vercel URL. Typing the code always works too. |
 | "This pilot is private" for a pilot student | Their email isn't in `allowed_emails`, or it's spelled differently | Fix `PILOT_ALLOWLIST` in `.env.local` and run `npm run seed` again |
 | "Too many sign-in emails" | Supabase's built-in email limit | Wait an hour, or set up custom SMTP (step 2 note) |
