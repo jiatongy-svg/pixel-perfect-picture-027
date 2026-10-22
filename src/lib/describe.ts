@@ -1,5 +1,6 @@
 // Short, human summaries of a plan or profile for cards ("Thanksgiving break · 3–4 days").
-import { EXPERIENCE, PACE, findBreak, findDestination } from "./catalog";
+import { EXPERIENCE, PACE, findBreak } from "./catalog";
+import { placeLabel, toPlaces } from "./places";
 import { addDays, formatDate, formatRange, toDay } from "./dates";
 import type { Person, PublicPlan } from "./types";
 
@@ -19,9 +20,10 @@ export function whenText(plan: PublicPlan, today: string): string {
 }
 
 export function whereText(plan: PublicPlan): string {
-  if (!plan.destinations.length) return "Open to anywhere";
-  const names = plan.destinations.slice(0, 2).map((id) => findDestination(id)?.name ?? id);
-  const more = plan.destinations.length > 2 ? ` +${plan.destinations.length - 2}` : "";
+  const places = toPlaces(plan.destinations); // older proposal snapshots store plain ids
+  if (!places.length) return "Open to anywhere";
+  const names = places.slice(0, 2).map(placeLabel);
+  const more = places.length > 2 ? ` +${places.length - 2}` : "";
   const flex = plan.destination_flex === "fixed" ? "" : plan.destination_flex === "open" ? " (open)" : " or nearby";
   return `${names.join(", ")}${more}${flex}`;
 }

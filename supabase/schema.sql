@@ -88,6 +88,7 @@ create table public.profiles (
   car_seats int not null default 0 check (car_seats between 0 and 7),
   equipment text[] not null default '{}'
     check (equipment <@ array['tent', 'sleeping_bag', 'camp_stove', 'cooler', 'hiking_gear', 'ski_gear', 'beach_gear']),
+  mbti text check (mbti is null or mbti in ('ISTJ', 'ISFJ', 'INFJ', 'INTJ', 'ISTP', 'ISFP', 'INFP', 'INTP', 'ESTP', 'ESFP', 'ENFP', 'ENTP', 'ESTJ', 'ESFJ', 'ENFJ', 'ENTJ')),
   completed boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -124,7 +125,9 @@ create table public.travel_plans (
   weekends date[] not null default '{}' check (cardinality(weekends) <= 8),
   trip_length_min int not null check (trip_length_min between 1 and 14),
   trip_length_max int not null check (trip_length_max between 1 and 14),
-  destinations text[] not null default '{}' check (cardinality(destinations) <= 5),
+  -- Ranked places: [{ "key": "joshua-tree" | "geo:123", "name", "country", "lat", "lon" }, ...]
+  destinations jsonb not null default '[]'::jsonb
+    constraint travel_plans_destinations_shape check (case when jsonb_typeof(destinations) = 'array' then jsonb_array_length(destinations) <= 5 else false end),
   destination_flex text not null check (destination_flex in ('fixed', 'open_to_nearby', 'open')),
   budget_min int not null check (budget_min >= 0),
   budget_max int not null check (budget_max <= 10000),
@@ -143,7 +146,7 @@ create table public.travel_plans (
   check (timing_mode <> 'weekends' or cardinality(weekends) >= 1),
   check (date_mode is null or date_mode = 'anytime'
          or (preferred_start is not null and preferred_end is not null and preferred_start <= preferred_end)),
-  check (destination_flex = 'open' or cardinality(destinations) >= 1),
+  constraint travel_plans_destinations_needed check (destination_flex = 'open' or (case when jsonb_typeof(destinations) = 'array' then jsonb_array_length(destinations) >= 1 else false end)),
   check (bringing_car or seats_offered = 0)
 );
 alter table public.travel_plans enable row level security;

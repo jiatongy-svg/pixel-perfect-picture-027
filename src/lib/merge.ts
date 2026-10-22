@@ -12,10 +12,11 @@
 //   7. A cost estimate with clear assumptions.
 // If no trip is possible, we say exactly which constraint conflicts.
 // ============================================================================
-import { equipmentLabel, findDestination, type Destination } from "./catalog";
+import { equipmentLabel, type Destination } from "./catalog";
 import { COSTS, SHARED_SPLIT_LABEL } from "./constants";
 import { addDays, daysInclusive, formatRange, formatWeekday, intersect, toDay } from "./dates";
-import { acceptedDestinations, budgetFit, dateFit, destinationFit, explainConflicts, planWindows, tripLength } from "./feasibility";
+import { acceptance, budgetFit, candidatePlaces, dateFit, destinationFit, explainConflicts, planWindows, tripLength } from "./feasibility";
+import { placeLabel, resolveDestination, type Place } from "./places";
 import type { DateRange, Person } from "./types";
 
 type Range = [number, number];
@@ -35,7 +36,7 @@ export type CostEstimate = {
 
 export type MergedTrip = {
   feasible: true;
-  destination: { id: string; name: string };
+  destination: { id: string; name: string; place?: Place }; // place: for the photo and map link
   dates: DateRange;
   days: number;
   summary: string;
@@ -57,11 +58,11 @@ export type MergeOverrides = { destinationId?: string; start?: string; end?: str
 // ---------------------------------------------------------------------------
 // Destination choice: highest combined preference, tie -> catalog order.
 // ---------------------------------------------------------------------------
-function preferencePoints(people: Person[], destId: string): number {
-  const dest = findDestination(destId)!;
+function preferencePoints(people: Person[], place: Place): number {
+  const dest = resolveDestination(place);
   let points = 0;
   for (const p of people) {
-    const a = acceptedDestinations(p.plan).get(destId);
+    const a = acceptance(p.plan, place);
     if (!a) return -Infinity;
     points += a.kind === "listed" ? 10 - a.rank : a.kind === "nearby" ? 3 : 1;
     // Small bonus for each of this person's vibes the place is good for.
@@ -72,8 +73,8 @@ function preferencePoints(people: Person[], destId: string): number {
 
 // "Sam's #1", "near Priya's picks", "Ana is open" — stored in the proposal, so
 // it's written with names (every member reads the same text).
-function rankLabel(p: Person, destId: string): string {
-  const a = acceptedDestinations(p.plan).get(destId);
+function rankLabel(p: Person, place: Place): string {
+  const a = acceptance(p.plan, place);
   if (a?.kind === "listed") return `${p.name}'s #${a.rank + 1}`;
   if (a?.kind === "nearby") return `near ${p.name}'s picks`;
   return `${p.name} is open`;
@@ -111,20 +112,22 @@ export function mergePlans(people: Person[], today: string, overrides: MergeOver
 
   // ---- Destination ---------------------------------------------------------
   const destFit = destinationFit(plans);
-  let destId: string;
+  let place: Place;
   if (overrides.destinationId) {
-    if (!destFit.common.includes(overrides.destinationId)) {
-      const name = findDestination(overrides.destinationId)?.name ?? "That destination";
-      const blockers = people.filter((p) => !acceptedDestinations(p.plan).has(overrides.destinationId!));
+    const asked = candidatePlaces(plans).find((c) => c.key === overrides.destinationId);
+    if (!asked || !destFit.common.some((c) => c.key === asked.key)) {
+      const name = asked ? placeLabel(asked) : "That destination";
+      const blockers = asked ? people.filter((p) => !acceptance(p.plan, asked)) : people;
       return { feasible: false, conflicts: [`${name} doesn't work for ${listNames(blockers.map((p) => p.name))} (outside their destination preferences).`] };
     }
-    destId = overrides.destinationId;
-    decisions.push(`${findDestination(destId)!.name} was requested in a counter and works for everyone.`);
+    place = asked;
+    decisions.push(`${placeLabel(place)} was requested in a counter and works for everyone.`);
   } else {
-    destId = [...destFit.common].sort((a, b) => preferencePoints(people, b) - preferencePoints(people, a))[0];
-    decisions.push(`${findDestination(destId)!.name}: ${people.map((p) => rankLabel(p, destId)).join(", ")}.`);
+    // Highest combined preference; ties keep candidate order (listed places first).
+    place = destFit.common.reduce((best, c) => (preferencePoints(people, c) > preferencePoints(people, best) ? c : best));
+    decisions.push(`${placeLabel(place)}: ${people.map((p) => rankLabel(p, place)).join(", ")}.`);
   }
-  const dest = findDestination(destId)!;
+  const dest = { ...resolveDestination(place), name: placeLabel(place) };
 
   // ---- Transport -----------------------------------------------------------
   const transport = pickTransport(people, dest);
@@ -140,7 +143,7 @@ export function mergePlans(people: Person[], today: string, overrides: MergeOver
 
   return {
     feasible: true,
-    destination: { id: dest.id, name: dest.name },
+    destination: { id: dest.id, name: dest.name, place },
     dates,
     days,
     summary: `${days}-day trip to ${dest.name}, ${formatRange(dates)}`,

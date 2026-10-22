@@ -48,7 +48,7 @@ async function as<T = Record<string, unknown>>(who: keyof typeof ids | "service"
 const planSql = (id: string, notes: string) => `
   insert into public.travel_plans (user_id, timing_mode, break_id, date_mode, trip_length_min, trip_length_max,
     destinations, destination_flex, budget_min, budget_max, vibes, notes)
-  values ('${id}', 'break', 'thanksgiving', 'anytime', 2, 4, '{joshua-tree}', 'open_to_nearby', 150, 400, '{outdoors}', '${notes}')`;
+  values ('${id}', 'break', 'thanksgiving', 'anytime', 2, 4, '[{"key":"joshua-tree","name":"Joshua Tree","lat":33.87,"lon":-115.9}]', 'open_to_nearby', 150, 400, '{outdoors}', '${notes}')`;
 
 beforeAll(async () => {
   db = new PGlite();
@@ -114,6 +114,8 @@ describe("RLS: profiles and plans", () => {
     await expect(as("ana", planSql(ids.ana, "dup"))).rejects.toThrow(/duplicate key/);
     await expect(as("ana", "update public.travel_plans set budget_min = 500, budget_max = 100")).rejects.toThrow(/check constraint/);
     await expect(as("ana", "update public.travel_plans set vibes = '{partying}'")).rejects.toThrow(/check constraint/);
+    await expect(as("ana", "update public.travel_plans set destinations = '{\"not\":\"a list\"}'")).rejects.toThrow(/check constraint/);
+    await expect(as("ana", "update public.profiles set mbti = 'ABCD'")).rejects.toThrow(/check constraint/);
   });
 });
 

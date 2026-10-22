@@ -16,11 +16,12 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
-import { findDestination, vibeLabel } from "./catalog";
+import { vibeLabel } from "./catalog";
 import { AI_MODEL, AI_TIMEOUT_MS } from "./constants";
 import { addDays, daysInclusive } from "./dates";
 import { dateFit, destinationFit } from "./feasibility";
 import { mergePlans, type MergedTrip } from "./merge";
+import { placeLabel, resolveDestination } from "./places";
 import type { Person } from "./types";
 
 const AiPlan = z.object({
@@ -38,7 +39,7 @@ export async function tryAiMerge(people: Person[], rules: MergedTrip, today: str
 
   const plans = people.map((p) => p.plan);
   const fit = dateFit(plans, today);
-  const options = destinationFit(plans).common.map((id) => ({ id, name: findDestination(id)!.name, good_for: findDestination(id)!.vibes }));
+  const options = destinationFit(plans).common.slice(0, 15).map((c) => ({ id: c.key, name: placeLabel(c), good_for: resolveDestination(c).vibes }));
   if (!fit.overlap) return rules;
 
   try {

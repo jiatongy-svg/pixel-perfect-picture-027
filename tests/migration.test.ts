@@ -30,3 +30,31 @@ it("002_open_to_usc upgrades the v1 schema without touching data", async () => {
   // Running it a second time is harmless (Navya might click Run twice).
   await expect(db.exec(read("../supabase/migrations/002_open_to_usc.sql"))).resolves.toBeDefined();
 });
+
+it("003_places_and_mbti converts saved quick-pick ids into places, in order", async () => {
+  const db = new PGlite();
+  await db.exec(`
+    create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
+    create schema auth; create table auth.users (id uuid primary key, email text);
+    create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+    grant usage on schema public, auth to anon, authenticated, service_role;
+    alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+    alter default privileges in schema public grant all on functions to anon, authenticated, service_role;`);
+  await db.exec(read("fixtures/schema-v1.sql"));
+  await db.exec(read("../supabase/migrations/002_open_to_usc.sql"));
+  const id = "00000000-0000-4000-8000-000000000001";
+  await db.exec(`insert into auth.users values ('${id}','me@usc.edu');
+    insert into public.profiles (id, display_name, msba_year, travel_experience, pace, schedule, completed) values ('${id}','Me','1st','some','balanced','flexible',true);
+    insert into public.travel_plans (user_id, timing_mode, break_id, date_mode, trip_length_min, trip_length_max, destinations, destination_flex, budget_min, budget_max)
+      values ('${id}','break','winter','anytime',2,4,'{tokyo,san-diego}','fixed',100,900);`);
+  await db.exec(read("../supabase/migrations/003_places_and_mbti.sql"));
+  const row = (await db.query<{ destinations: { key: string; name: string; lat: number }[] }>("select destinations from public.travel_plans")).rows[0];
+  expect(row.destinations.map((d) => d.key)).toEqual(["tokyo", "san-diego"]);
+  expect(row.destinations[0].name).toBe("Tokyo");
+  expect(typeof row.destinations[0].lat).toBe("number");
+  // The view is back, and running the upgrade again is harmless.
+  expect((await db.query("select destinations from public.plan_cards")).rows).toHaveLength(0); // superuser isn't allowlisted
+  await expect(db.exec(read("../supabase/migrations/003_places_and_mbti.sql"))).resolves.toBeDefined();
+  await db.exec(`update public.profiles set mbti = 'ENFP'`);
+  await expect(db.exec(`update public.travel_plans set destinations = '[]', destination_flex = 'fixed'`)).rejects.toThrow(/check constraint/);
+});

@@ -139,9 +139,9 @@ export function Card({ children, className, as: Tag = "section" }: { children: R
   return <Tag className={cx("min-w-0 rounded-lg border border-border bg-surface-raised p-4 shadow-sm sm:p-5", className)}>{children}</Tag>;
 }
 
-export function Badge({ tone = "neutral", children }: { tone?: "gold" | "neutral" | "success" | "warning" | "danger" | "info"; children: ReactNode }) {
+export function Badge({ tone = "neutral", children }: { tone?: "highlight" | "neutral" | "success" | "warning" | "danger" | "info"; children: ReactNode }) {
   const tones = {
-    gold: "bg-gold text-gold-text",
+    highlight: "bg-highlight text-highlight-text",
     neutral: "bg-surface-sunken text-text",
     success: "bg-success-bg text-success-text",
     warning: "bg-warning-bg text-warning-text",

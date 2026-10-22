@@ -13,7 +13,10 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Car, Check } from "lucide-react";
 import { savePlan } from "@/app/actions";
-import { BREAKS, DESTINATIONS, EQUIPMENT, REGIONS, VIBES, findBreak, type EquipmentId, type RegionId, type VibeId } from "@/lib/catalog";
+import { BREAKS, EQUIPMENT, VIBES, findBreak, type EquipmentId, type VibeId } from "@/lib/catalog";
+import { NEARBY_KM } from "@/lib/constants";
+import { toPlaces } from "@/lib/places";
+import { DestinationPicker } from "@/components/DestinationPicker";
 import { PLAN_LIMITS } from "@/lib/constants";
 import { addDays, formatRange } from "@/lib/dates";
 import type { DestinationFlex, Plan, Profile } from "@/lib/types";
@@ -29,7 +32,7 @@ const DEFAULT: Draft = {
 
 const FLEX: { id: DestinationFlex; title: string; description: string }[] = [
   { id: "fixed", title: "Only these", description: "I'll only go to places on my list" },
-  { id: "open_to_nearby", title: "These or nearby", description: "Similar places in the same region work too" },
+  { id: "open_to_nearby", title: "These or nearby", description: `Places within ${NEARBY_KM} km work too` },
   { id: "open", title: "Anywhere", description: "My list is a preference, not a rule" },
 ];
 
@@ -42,7 +45,9 @@ type Props = {
 
 export function PlanForm({ initial, profile, fridays, next }: Props) {
   const router = useRouter();
-  const [d, setD] = useState<Draft>(() => (initial ? { ...DEFAULT, ...initial, notes: initial.notes ?? "", flex_days: initial.flex_days || 2 } : DEFAULT));
+  const [d, setD] = useState<Draft>(() =>
+    initial ? { ...DEFAULT, ...initial, destinations: toPlaces(initial.destinations), notes: initial.notes ?? "", flex_days: initial.flex_days || 2 } : DEFAULT,
+  );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [result, setResult] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
@@ -53,19 +58,9 @@ export function PlanForm({ initial, profile, fridays, next }: Props) {
   const maxLen = d.timing_mode === "weekends" ? 3 : PLAN_LIMITS.maxTripDays;
   // Past weekends from an older plan stay visible so they can be removed.
   const fridayOptions = useMemo(() => [...new Set([...d.weekends, ...fridays])].sort(), [d.weekends, fridays]);
-  const byRegion = useMemo(() => {
-    const m = new Map<RegionId, typeof DESTINATIONS[number][]>();
-    for (const dest of DESTINATIONS) m.set(dest.region, [...(m.get(dest.region) ?? []), dest]);
-    return [...m];
-  }, []);
-
-  function toggleDestination(id: string) {
-    setD((x) => {
-      if (x.destinations.includes(id)) return { ...x, destinations: x.destinations.filter((y) => y !== id) };
-      if (x.destinations.length >= PLAN_LIMITS.maxDestinations) return x;
-      return { ...x, destinations: [...x.destinations, id], destination_flex: x.destinations.length === 0 && x.destination_flex === "open" ? "open_to_nearby" : x.destination_flex };
-    });
-  }
+  // Picking a first place after "I'm open" switches back to "these or nearby".
+  const setDestinations = (places: Draft["destinations"]) =>
+    setD((x) => ({ ...x, destinations: places, destination_flex: x.destinations.length === 0 && places.length > 0 && x.destination_flex === "open" ? "open_to_nearby" : x.destination_flex }));
 
   function submit() {
     setResult(null);
@@ -180,31 +175,13 @@ export function PlanForm({ initial, profile, fridays, next }: Props) {
       {/* 2. WHERE ----------------------------------------------------------- */}
       <Card>
         <h2 className="mb-1 text-lg font-semibold">Where?</h2>
-        <p className="mb-4 text-sm text-muted">Tap in order of preference (up to {PLAN_LIMITS.maxDestinations}). No plan yet? That's fine — say you're open.</p>
+        <p className="mb-4 text-sm text-muted">Search any city or tap a popular pick, in order of preference (up to {PLAN_LIMITS.maxDestinations}). No plan yet? That&apos;s fine — say you&apos;re open.</p>
         <div className="flex flex-col gap-5">
           <Chip selected={noIdea} className="self-start" onClick={() => setD((x) => (noIdea ? { ...x, destination_flex: "open_to_nearby" } : { ...x, destinations: [], destination_flex: "open" }))}>
             {noIdea && <Check aria-hidden className="size-3.5" />} No destination yet — I'm open to anywhere
           </Chip>
           <Group id="destinations" legend="Destinations" error={err("destinations")}>
-            <div className="flex flex-col gap-4">
-              {byRegion.map(([region, dests]) => (
-                <div key={region} className="min-w-0">
-                  <p className="mb-2 text-xs font-semibold tracking-wide text-muted uppercase">{REGIONS[region]}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {dests.map((dest) => {
-                      const rank = d.destinations.indexOf(dest.id);
-                      return (
-                        <Chip key={dest.id} selected={rank >= 0} disabled={rank < 0 && d.destinations.length >= PLAN_LIMITS.maxDestinations} onClick={() => toggleDestination(dest.id)}
-                          aria-label={rank >= 0 ? `${dest.name}, choice ${rank + 1}` : dest.name}>
-                          {rank >= 0 && <span aria-hidden className="inline-flex size-5 items-center justify-center rounded-full bg-accent text-[0.6875rem] font-bold text-on-accent">{rank + 1}</span>}
-                          {dest.name}
-                        </Chip>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <DestinationPicker value={d.destinations} onChange={setDestinations} max={PLAN_LIMITS.maxDestinations} />
           </Group>
           {d.destinations.length > 0 && (
             <Group legend="How flexible are you on the place?">

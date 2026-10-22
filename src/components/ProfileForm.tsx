@@ -10,16 +10,18 @@ import { saveProfile } from "@/app/actions";
 import { EQUIPMENT, EXPERIENCE, LODGING, PACE, SCHEDULE, type EquipmentId, type LodgingId } from "@/lib/catalog";
 import { PROFILE_LIMITS } from "@/lib/constants";
 import { createBrowserSupabase } from "@/lib/supabase/client";
-import type { Profile } from "@/lib/types";
+import { MBTI_TYPES, type Mbti, type Profile } from "@/lib/types";
 import { Avatar, Button, Card, Chip, Field, Group, Notice, OptionCard, inputBase, inputClass } from "@/components/ui";
 
 type Draft = Omit<Profile, "id" | "completed">;
 
 const EMPTY: Draft = {
   display_name: "", msba_year: "1st", photo_path: null, bio: "", travel_experience: "some", pace: "balanced",
-  schedule: "flexible", lodging_prefs: [], has_car: false, car_seats: 0, equipment: [],
+  schedule: "flexible", lodging_prefs: [], has_car: false, car_seats: 0, equipment: [], mbti: null,
 };
 
+// `next`: where to go after saving (onboarding). Without it, saving returns to
+// the short profile summary.
 export function ProfileForm({ userId, initial, photoUrl, next }: { userId: string; initial: Profile | null; photoUrl: string | null; next?: string }) {
   const router = useRouter();
   const [d, setD] = useState<Draft>(initial ? { ...EMPTY, ...initial } : EMPTY);
@@ -59,8 +61,8 @@ export function ProfileForm({ userId, initial, photoUrl, next }: { userId: strin
         return;
       }
       setErrors({});
-      if (next) router.push(next);
-      else setResult({ tone: "success", text: "Profile saved." });
+      router.push(next ?? "/profile?saved=1");
+      router.refresh();
     });
   }
 
@@ -120,6 +122,12 @@ export function ProfileForm({ userId, initial, photoUrl, next }: { userId: strin
               {SCHEDULE.map((x) => <OptionCard key={x.id} selected={d.schedule === x.id} title={x.label} onSelect={() => set("schedule", x.id)} />)}
             </div>
           </Group>
+          <Field id="mbti" label="MBTI" optional hint="Shown to matches for fun. It never changes your match score.">
+            <select id="mbti" className={`${inputBase} w-full sm:w-64`} value={d.mbti ?? ""} onChange={(e) => set("mbti", (e.target.value || null) as Mbti | null)}>
+              <option value="">Not sure / prefer not to say</option>
+              {MBTI_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </Field>
           <Group legend="Where you like to stay" hint="Pick any that you're happy with.">
             <div className="flex flex-wrap gap-2">
               {LODGING.map((x) => (

@@ -5,7 +5,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight, CheckCircle2, Circle } from "lucide-react";
-import { findDestination, vibeLabel } from "@/lib/catalog";
+import { vibeLabel } from "@/lib/catalog";
+import { placeLabel } from "@/lib/places";
 import { todayLA } from "@/lib/dates";
 import { budgetText, whenText, whereText } from "@/lib/describe";
 import { dateFit, destinationFit } from "@/lib/feasibility";
@@ -32,7 +33,7 @@ export default async function ProposalPage({ params, searchParams }: { params: P
   // Counter options come from everyone's CURRENT plans (what's still feasible).
   const live = await loadPeople(supabase, p.people.map((m) => m.id));
   const plans = live.map((x) => x.plan);
-  const options = live.length === p.people.length ? destinationFit(plans).common.map((d) => ({ id: d, name: findDestination(d)!.name })) : [];
+  const options = live.length === p.people.length ? destinationFit(plans).common.slice(0, 30).map((c) => ({ id: c.key, name: placeLabel(c) })) : [];
   const window = live.length === p.people.length ? dateFit(plans, today).overlap : null;
   const trip = p.current.merged;
 
@@ -41,7 +42,7 @@ export default async function ProposalPage({ params, searchParams }: { params: P
       <PageHeader
         title={`Trip with ${p.people.filter((m) => m.id !== userId).map((m) => m.display_name).join(", ")}`}
         subtitle={`Proposed by ${p.created_by === userId ? "you" : creator} · version ${p.current_version}`}
-        action={<Badge tone={p.status === "pending" ? "gold" : p.status === "confirmed" ? "success" : "neutral"}>{p.status[0].toUpperCase() + p.status.slice(1)}</Badge>}
+        action={<Badge tone={p.status === "pending" ? "highlight" : p.status === "confirmed" ? "success" : "neutral"}>{p.status[0].toUpperCase() + p.status.slice(1)}</Badge>}
       />
 
       {existing && <Notice tone="info">There was already an open proposal for this group, so we opened it instead of creating a duplicate.</Notice>}
@@ -108,7 +109,7 @@ export default async function ProposalPage({ params, searchParams }: { params: P
         <ol className="flex flex-col gap-3">
           {[...p.versions].reverse().map((v) => (
             <li key={v.version} className="flex gap-3 text-sm">
-              <Badge tone={v.version === p.current_version ? "gold" : "neutral"}>v{v.version}</Badge>
+              <Badge tone={v.version === p.current_version ? "highlight" : "neutral"}>v{v.version}</Badge>
               <div className="min-w-0">
                 <p><span className="font-medium">{v.created_by === userId ? "You" : p.people.find((m) => m.id === v.created_by)?.display_name}</span> {v.version === 1 ? "proposed" : "countered"}: {v.merged.summary}</p>
                 {v.note && <p className="text-muted">“{v.note}”</p>}

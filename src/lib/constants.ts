@@ -36,6 +36,12 @@ export const MIN_BUDGET_OVERLAP = 0;
 // If someone only wants a 1-day trip, we use their shorter length instead.
 export const MIN_SHARED_DAYS = 2;
 
+// Two places closer than this count as the SAME place (e.g. a searched
+// "San Diego" and the quick-pick "San Diego").
+export const SAME_PLACE_KM = 30;
+// "Open to nearby" accepts places within this distance of one you listed.
+export const NEARBY_KM = 250;
+
 // Partial credit for the destination score when you don't list the same place:
 //   NEARBY  — one of you listed it and the other is "open to nearby" in that region
 //   OPEN    — the other person is fully open to anywhere

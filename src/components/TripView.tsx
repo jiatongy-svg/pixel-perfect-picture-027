@@ -7,6 +7,7 @@ import { Backpack, CarFront, Lightbulb, Plane, Route, Sparkles } from "lucide-re
 import { formatRange } from "@/lib/dates";
 import type { CostLine, MergedTrip } from "@/lib/merge";
 import { Badge, Card, Notice } from "@/components/ui";
+import { DestinationImage } from "@/components/DestinationImage";
 
 const money = ([lo, hi]: [number, number]) => (lo === hi ? `$${lo.toLocaleString()}` : `$${lo.toLocaleString()}–$${hi.toLocaleString()}`);
 
@@ -15,6 +16,7 @@ export function TripView({ trip }: { trip: MergedTrip }) {
   return (
     <div className="flex flex-col gap-4">
       <Card>
+        {trip.destination.place && <DestinationImage place={trip.destination.place} className="mb-4 h-44 sm:h-56" />}
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <p className="text-sm text-muted">{formatRange(trip.dates)} · {trip.days} {trip.days === 1 ? "day" : "days"}</p>

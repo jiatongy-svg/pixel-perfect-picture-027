@@ -5,6 +5,7 @@
 import "server-only";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { toPlaces } from "@/lib/places";
 import type { Person, Plan, Profile, PublicPlan } from "@/lib/types";
 import type { MergedTrip } from "@/lib/merge";
 
@@ -55,8 +56,9 @@ export function toPerson(profile: Profile, plan: PublicPlan): Person {
       lodging_prefs: profile.lodging_prefs,
       bio: profile.bio,
       photo_path: profile.photo_path,
+      mbti: profile.mbti ?? null,
     },
-    plan,
+    plan: { ...plan, destinations: toPlaces(plan.destinations) },
   };
 }
 

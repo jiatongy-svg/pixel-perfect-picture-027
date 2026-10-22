@@ -30,7 +30,9 @@ Phone/laptop ──HTTPS──> Next.js on Vercel ──> Supabase (sign-in + Po
 | Path | What it is |
 |---|---|
 | `src/lib/constants.ts` | **Every tunable number:** score weights, thresholds, group size, cost ranges |
-| `src/lib/catalog.ts` | Breaks, vibes (with descriptions), equipment, destinations |
+| `src/lib/catalog.ts` | Breaks, vibes (with descriptions), equipment, popular destinations |
+| `src/lib/places.ts` | Places anywhere in the world: distance, labels, world city search, trip details for any city |
+| `src/lib/filters.ts` | The filter bar on Explore and Matches |
 | `src/lib/feasibility.ts` | Hard checks: dates, destination, budget (works for 2–4 people) |
 | `src/lib/matching.ts` | Pair score, group score, reasons, ranking |
 | `src/lib/merge.ts` | Rules-based merged trip, transport, gear, outline, cost estimate |
@@ -48,7 +50,7 @@ Phone/laptop ──HTTPS──> Next.js on Vercel ──> Supabase (sign-in + Po
 **Hard rules.** A pair is not shown if any of these fail:
 
 1. **Dates:** there must be at least 2 shared days (or 1, if someone only wants a 1-day trip) inside both people's free windows. Exact ("fixed") dates are never moved.
-2. **Destination:** at least one place must work for both. "Only these" means only places on the list. "Or nearby" also accepts places in the same region. "Anywhere" accepts everything.
+2. **Destination:** at least one place must work for both. "Only these" means only places on the list. "Or nearby" also accepts places within 250 km of one on the list. "Anywhere" accepts everything. Two picks within 30 km count as the same place.
 3. **Budget:** the ranges must overlap (touching counts).
 
 **Score (0–100):** dates 35 + destination 30 + budget 20 + vibes 15.
@@ -89,6 +91,8 @@ npm run rls-check  # security checks against the real Supabase project
 - `superseded` exists as a proposal status but isn't used yet.
 
 ## Changelog
+
+- **2026-10-22 (evening)** Explore page (all classmates' plans, anonymous, best match first); filters (when, vibe, max budget, destination) on Explore and Matches; matches grouped by Thanksgiving / Winter / Spring / Weekends; profile shows as a short summary after saving; destinations can be any city worldwide (Open-Meteo city search) plus popular quick picks, with "nearby" = within 250 km; destination photos (Wikipedia, credited) and Google Maps links, and optional MBTI (from Steven's prototype; MBTI never affects the score); green + cream palette. Database: `migrations/003_places_and_mbti.sql`.
 
 - **2026-10-22** Opened sign-in to every @usc.edu address (`allowed_domains` + `email_allowed()`, migration `002_open_to_usc.sql`). Email links are now scanner-safe (USC Outlook pre-opens links), and the 6-digit code is the main sign-in path. Email is sent through Brevo SMTP.
 

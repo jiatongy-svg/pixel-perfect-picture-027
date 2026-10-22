@@ -50,7 +50,7 @@ describe("hard constraints", () => {
     const a = person("a", "A", { destinations: ["yosemite"], destination_flex: "fixed" });
     const b = person("b", "B", { destinations: ["mammoth"], destination_flex: "open_to_nearby" });
     const fit = destinationFit([a.plan, b.plan]);
-    expect(fit.common).toEqual(["yosemite"]);
+    expect(fit.common.map((c) => c.key)).toEqual(["yosemite"]);
     expect(fit.ratio).toBeCloseTo(0.6);
   });
   it("budgets must overlap", () => {

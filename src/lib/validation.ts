@@ -8,12 +8,30 @@
 // Each rule returns a friendly message tied to the form field it's about.
 // ============================================================================
 import { z } from "zod";
-import { BREAK_IDS, DESTINATION_IDS, EQUIPMENT_IDS, VIBE_IDS, findBreak } from "./catalog";
+import { BREAK_IDS, EQUIPMENT_IDS, VIBE_IDS, findBreak, findDestination } from "./catalog";
 import { PLAN_LIMITS, PROFILE_LIMITS } from "./constants";
 import { daysInclusive, isFriday, isIsoDate, toDay, upcomingFridays } from "./dates";
+import { MBTI_TYPES } from "./types";
 
 const isoDate = z.string().refine(isIsoDate, "Pick a valid date");
 const unique = <T>(xs: T[]) => new Set(xs).size === xs.length;
+
+// A destination: a quick pick (its id must exist) or a searched city ("geo:123").
+// Quick picks always use the official name and coordinates from catalog.ts.
+const placeSchema = z
+  .object({
+    key: z.string().regex(/^([a-z0-9-]{1,40}|geo:\d{1,12})$/, "Unknown destination"),
+    name: z.string().trim().min(1).max(80),
+    country: z.string().trim().max(60).optional(),
+    region: z.string().trim().max(60).optional(),
+    lat: z.number().min(-90).max(90),
+    lon: z.number().min(-180).max(180),
+  })
+  .refine((p) => p.key.startsWith("geo:") || !!findDestination(p.key), "Unknown destination")
+  .transform((p) => {
+    const d = findDestination(p.key);
+    return d ? { key: d.id, name: d.name, country: d.country, lat: d.lat, lon: d.lon } : p;
+  });
 
 // ---------------------------------------------------------------------------
 // Travel profile
@@ -31,6 +49,7 @@ export const profileSchema = z
     has_car: z.boolean(),
     car_seats: z.number().int().min(0).max(PROFILE_LIMITS.maxSeats, `At most ${PROFILE_LIMITS.maxSeats} passenger seats`),
     equipment: z.array(z.enum(EQUIPMENT_IDS)).max(EQUIPMENT_IDS.length).refine(unique, "Duplicate item"),
+    mbti: z.enum(MBTI_TYPES).nullable(),
   })
   .superRefine((p, ctx) => {
     if (p.has_car && p.car_seats < 1) ctx.addIssue({ code: "custom", path: ["car_seats"], message: "How many passengers can your car take?" });
@@ -54,7 +73,10 @@ export function planSchema(today: string) {
       weekends: z.array(isoDate).max(PLAN_LIMITS.maxWeekends, `Pick at most ${PLAN_LIMITS.maxWeekends} weekends`).refine(unique, "Duplicate weekend"),
       trip_length_min: z.number().int().min(1).max(PLAN_LIMITS.maxTripDays),
       trip_length_max: z.number().int().min(1).max(PLAN_LIMITS.maxTripDays),
-      destinations: z.array(z.string().refine((d) => DESTINATION_IDS.includes(d), "Unknown destination")).max(PLAN_LIMITS.maxDestinations, `Pick up to ${PLAN_LIMITS.maxDestinations}`).refine(unique, "Duplicate destination"),
+      destinations: z
+        .array(placeSchema)
+        .max(PLAN_LIMITS.maxDestinations, `Pick up to ${PLAN_LIMITS.maxDestinations}`)
+        .refine((xs) => unique(xs.map((x) => x.key)), "Duplicate destination"),
       destination_flex: z.enum(["fixed", "open_to_nearby", "open"]),
       budget_min: z.number({ message: "Enter a number" }).int("Whole dollars only").min(0, "Can't be negative").max(PLAN_LIMITS.maxBudget),
       budget_max: z.number({ message: "Enter a number" }).int("Whole dollars only").min(0).max(PLAN_LIMITS.maxBudget, `At most $${PLAN_LIMITS.maxBudget.toLocaleString()}`),
@@ -126,7 +148,7 @@ export const counterSchema = z
   .object({
     proposalId: z.string().uuid(),
     version: z.number().int().min(1),
-    destinationId: z.string().refine((d) => DESTINATION_IDS.includes(d), "Pick a destination"),
+    destinationId: z.string().regex(/^([a-z0-9-]{1,40}|geo:\d{1,12})$/, "Pick a destination"),
     start: isoDate,
     end: isoDate,
     note: z.string().trim().max(300, "Keep it under 300 characters"),

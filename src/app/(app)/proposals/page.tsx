@@ -47,7 +47,7 @@ function Section({ title, items, userId, empty }: { title: string; items: Loaded
           {items.map((p) => {
             const others = p.people.filter((m) => m.id !== userId).map((m) => m.display_name);
             const trip = p.current.merged;
-            const tone = p.status === "confirmed" ? "success" : p.status === "pending" ? "gold" : "neutral";
+            const tone = p.status === "confirmed" ? "success" : p.status === "pending" ? "highlight" : "neutral";
             return (
               <li key={p.id}>
                 <Link href={p.status === "confirmed" ? `/trips/${p.id}` : `/proposals/${p.id}`}

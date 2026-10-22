@@ -5,6 +5,7 @@
 // column there, add it here too.
 // ============================================================================
 import type { BreakId, EquipmentId, ExperienceId, LodgingId, PaceId, ScheduleId, VibeId } from "./catalog";
+import type { Place } from "./places";
 
 // One row of the `profiles` table: the student's travel profile.
 export type Profile = {
@@ -20,8 +21,12 @@ export type Profile = {
   has_car: boolean;
   car_seats: number; // passenger seats (not counting the driver)
   equipment: EquipmentId[];
+  mbti: Mbti | null; // optional; shown for reference only, never part of the score
   completed: boolean;
 };
+
+export const MBTI_TYPES = ["ISTJ", "ISFJ", "INFJ", "INTJ", "ISTP", "ISFP", "INFP", "INTP", "ESTP", "ESFP", "ENFP", "ENTP", "ESTJ", "ESFJ", "ENFJ", "ENTJ"] as const;
+export type Mbti = (typeof MBTI_TYPES)[number];
 
 export type DateMode = "anytime" | "fixed" | "flex";
 export type DestinationFlex = "fixed" | "open_to_nearby" | "open";
@@ -39,7 +44,7 @@ export type Plan = {
   weekends: string[]; // Fridays, YYYY-MM-DD, only for timing_mode = "weekends"
   trip_length_min: number;
   trip_length_max: number;
-  destinations: string[]; // ordered, most wanted first
+  destinations: Place[]; // ordered, most wanted first (quick picks or any searched city)
   destination_flex: DestinationFlex;
   budget_min: number;
   budget_max: number;
@@ -59,7 +64,7 @@ export type Person = {
   id: string;
   name: string;
   msbaYear: "1st" | "2nd";
-  profile: Pick<Profile, "has_car" | "car_seats" | "equipment" | "travel_experience" | "pace" | "schedule" | "lodging_prefs" | "bio" | "photo_path">;
+  profile: Pick<Profile, "has_car" | "car_seats" | "equipment" | "travel_experience" | "pace" | "schedule" | "lodging_prefs" | "bio" | "photo_path" | "mbti">;
   plan: PublicPlan;
 };
 

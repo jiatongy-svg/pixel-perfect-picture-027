@@ -9,7 +9,9 @@ import { useState, useTransition } from "react";
 import { Car, MapPin, CalendarDays, Wallet, ArrowRight } from "lucide-react";
 import { passMatch, proposeTrip } from "@/app/actions";
 import { budgetText, styleText, whenText, whereText } from "@/lib/describe";
-import type { Person } from "@/lib/types";
+import type { Place } from "@/lib/places";
+import type { Mbti, Person } from "@/lib/types";
+import { DestinationImage } from "@/components/DestinationImage";
 import { Avatar, Badge, Button, Card, Notice } from "@/components/ui";
 
 type Props = {
@@ -20,9 +22,14 @@ type Props = {
   targetKey: string;
   openProposalId: string | null;
   today: string;
+  place: Place | null; // best shared destination, for the photo
+  viewerMbti: Mbti | null;
 };
 
-export function MatchCard({ kind, score, reasons, members, targetKey, openProposalId, today }: Props) {
+// Shared MBTI letters (0–4). Just for fun: it never affects the score.
+const sharedLetters = (a: string, b: string) => [...a].filter((ch, i) => ch === b[i]).length;
+
+export function MatchCard({ kind, score, reasons, members, targetKey, openProposalId, today, place, viewerMbti }: Props) {
   const [proposing, startPropose] = useTransition();
   const [passing, startPass] = useTransition();
   const [error, setError] = useState<{ text: string; conflicts?: string[] } | null>(null);
@@ -47,6 +54,7 @@ export function MatchCard({ kind, score, reasons, members, targetKey, openPropos
 
   return (
     <Card as="article" className="flex h-full flex-col gap-4">
+      {place && <DestinationImage place={place} />}
       <header className="flex items-start gap-3">
         {kind === "pair" ? (
           <Avatar name={members[0].person.name} url={members[0].photo} />
@@ -61,7 +69,7 @@ export function MatchCard({ kind, score, reasons, members, targetKey, openPropos
             {kind === "pair" ? `MSBA ${members[0].person.msbaYear} year · ${styleText(members[0].person)}` : `${members.length + 1} people · ${members.map((m) => `${m.person.msbaYear} yr`).join(", ")}`}
           </p>
         </div>
-        <Badge tone="gold">{score}% match</Badge>
+        <Badge tone="highlight">{score}% match</Badge>
       </header>
 
       <ul className="flex flex-col gap-1.5 text-sm">
@@ -78,6 +86,16 @@ export function MatchCard({ kind, score, reasons, members, targetKey, openPropos
           {members[0].person.plan.bringing_car && <Snap icon={<Car className="size-4" />} label="Car" value={`${members[0].person.plan.seats_offered} open seats`} />}
         </dl>
       )}
+
+      {(() => {
+        const them = members.filter((m) => m.person.profile.mbti);
+        if (!them.length) return null;
+        return (
+          <p className="text-xs text-muted">
+            MBTI: {them.map((m) => `${kind === "group" ? `${m.person.name} ` : ""}${m.person.profile.mbti}${viewerMbti ? ` (${sharedLetters(viewerMbti, m.person.profile.mbti!)}/4 letters like you)` : ""}`).join(" · ")}
+          </p>
+        );
+      })()}
 
       {error && (
         <Notice tone="error" title={error.text}>

@@ -9,8 +9,9 @@
 //   2. Destination — is there at least one place everyone would accept?
 //   3. Budget      — do everyone's budget ranges overlap?
 // ============================================================================
-import { DESTINATIONS, findBreak, findDestination } from "./catalog";
-import { DESTINATION_PARTIAL, MIN_BUDGET_OVERLAP, MIN_SHARED_DAYS } from "./constants";
+import { findBreak } from "./catalog";
+import { DESTINATION_PARTIAL, MIN_BUDGET_OVERLAP, MIN_SHARED_DAYS, NEARBY_KM, SAME_PLACE_KM } from "./constants";
+import { CATALOG_PLACES, distanceKm, placeLabel, type Place } from "./places";
 import { addDays, daysInclusive, formatDate, formatRange, intersectLists, toDay } from "./dates";
 import type { DateRange, Person, PublicPlan } from "./types";
 
@@ -136,55 +137,72 @@ export function describeTiming(plan: PublicPlan, today: string): string {
 // ---------------------------------------------------------------------------
 
 // How happy someone is with a destination:
-//   listed  — it's on their list (rank 0 = their top pick)
-//   nearby  — not on their list, but in the same region and they're "open to nearby"
+//   listed  — it's on their list (rank 0 = their top pick), or within
+//             SAME_PLACE_KM of something on their list (same city, different pick)
+//   nearby  — within NEARBY_KM of a listed place, and they're "open to nearby"
 //   open    — they said they're open to anywhere
 export type Acceptance = { kind: "listed"; rank: number } | { kind: "nearby" } | { kind: "open" };
 
-export function acceptedDestinations(plan: PublicPlan): Map<string, Acceptance> {
-  const out = new Map<string, Acceptance>();
-  plan.destinations.forEach((id, rank) => {
-    if (findDestination(id)) out.set(id, { kind: "listed", rank });
+export function acceptance(plan: PublicPlan, place: Place): Acceptance | null {
+  let rank = -1;
+  let near = false;
+  plan.destinations.forEach((mine, i) => {
+    const same = mine.key === place.key || distanceKm(mine, place) <= SAME_PLACE_KM;
+    if (same && rank < 0) rank = i;
+    else if (distanceKm(mine, place) <= NEARBY_KM) near = true;
   });
-  if (plan.destination_flex === "fixed") return out;
-
-  const regions = new Set(plan.destinations.map((id) => findDestination(id)?.region));
-  for (const d of DESTINATIONS) {
-    if (out.has(d.id)) continue;
-    if (regions.has(d.region)) out.set(d.id, { kind: "nearby" });
-    else if (plan.destination_flex === "open") out.set(d.id, { kind: "open" });
-  }
-  return out;
+  if (rank >= 0) return { kind: "listed", rank };
+  if (plan.destination_flex === "fixed") return null;
+  if (near) return { kind: "nearby" };
+  if (plan.destination_flex === "open") return { kind: "open" };
+  return null;
 }
 
 const credit = (a: Acceptance) => (a.kind === "listed" ? 1 : a.kind === "nearby" ? DESTINATION_PARTIAL.nearby : DESTINATION_PARTIAL.open);
 
+// Every place worth considering for a group: what anyone listed (in rank
+// order), then the popular quick picks. Duplicates by key are dropped.
+export function candidatePlaces(plans: PublicPlan[]): Place[] {
+  const seen = new Set<string>();
+  const out: Place[] = [];
+  const maxRank = Math.max(0, ...plans.map((p) => p.destinations.length));
+  for (let r = 0; r < maxRank; r++)
+    for (const p of plans) {
+      const place = p.destinations[r];
+      if (place && !seen.has(place.key)) { seen.add(place.key); out.push(place); }
+    }
+  for (const place of CATALOG_PLACES) if (!seen.has(place.key)) { seen.add(place.key); out.push(place); }
+  return out;
+}
+
 export type DestinationFit = {
   feasible: boolean;
-  common: string[]; // destination ids everyone accepts, catalog order
+  common: Place[]; // places everyone accepts
   ratio: number; // 0..1 — the best "weakest-person credit" over the common places
-  best: string | null; // the place behind that ratio
+  best: Place | null; // the place behind that ratio
 };
 
 // Destination check for a group: the places everyone accepts, and how good the
 // best one is for the LEAST happy person (so nobody gets steamrolled).
 export function destinationFit(plans: PublicPlan[]): DestinationFit {
-  const maps = plans.map(acceptedDestinations);
-  const common = DESTINATIONS.map((d) => d.id).filter((id) => maps.every((m) => m.has(id)));
-  let best: string | null = null;
+  const common: Place[] = [];
+  let best: Place | null = null;
   let ratio = 0;
-  for (const id of common) {
-    const r = Math.min(...maps.map((m) => credit(m.get(id)!)));
+  for (const place of candidatePlaces(plans)) {
+    const each = plans.map((p) => acceptance(p, place));
+    if (each.some((a) => !a)) continue;
+    common.push(place);
+    const r = Math.min(...each.map((a) => credit(a!)));
     if (r > ratio) {
       ratio = r;
-      best = id;
+      best = place;
     }
   }
   return { feasible: common.length > 0, common, ratio, best };
 }
 
 export function describeDestinations(plan: PublicPlan): string {
-  const names = plan.destinations.map((id) => findDestination(id)?.name ?? id);
+  const names = plan.destinations.map(placeLabel);
   if (names.length === 0) return "is open to anywhere";
   const list = names.slice(0, 3).join(", ");
   if (plan.destination_flex === "fixed") return `only wants ${list}`;

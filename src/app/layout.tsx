@@ -10,15 +10,14 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#FAF6EF" },
-    { media: "(prefers-color-scheme: dark)", color: "#1c1a18" },
-  ],
+  themeColor: "#FBF8F0",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    // Always the light cream theme (the dark tokens in globals.css only apply
+    // if this attribute is removed).
+    <html lang="en" data-theme="light" style={{ colorScheme: "light" }}>
       <body>{children}</body>
     </html>
   );
