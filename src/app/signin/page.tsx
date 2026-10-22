@@ -24,7 +24,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
           where you overlap, and what it might cost.
         </p>
         <ol className="mt-6 grid gap-3 text-sm">
-          {["Sign in with your pilot email", "Build your travel profile and one plan", "Propose a trip; it's set when everyone accepts"].map((s, i) => (
+          {["Sign in with your USC email", "Build your travel profile and one plan", "Propose a trip; it's set when everyone accepts"].map((s, i) => (
             <li key={s} className="flex items-center gap-3">
               <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-gold text-xs font-bold text-gold-text">{i + 1}</span>
               {s}

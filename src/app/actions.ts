@@ -61,7 +61,8 @@ export async function sendSignInEmail(rawEmail: string): Promise<ActionResult> {
   // Check access BEFORE sending anything: the email must be on the allowlist,
   // or its domain must be open (e.g. every @usc.edu address). Anyone else gets
   // the "private" message and no email or account is created.
-  const { data: allowed, error: checkErr } = await createAdminClient().rpc("email_allowed", { p_email: parsed.data });
+  const admin = createAdminClient();
+  const { data: allowed, error: checkErr } = await admin.rpc("email_allowed", { p_email: parsed.data });
   if (checkErr) {
     // Log only the error type (never the email) so it shows in Vercel -> Logs.
     console.error("email_allowed check failed:", checkErr.code, checkErr.message);
@@ -69,16 +70,26 @@ export async function sendSignInEmail(rawEmail: string): Promise<ActionResult> {
   }
   if (!allowed) return { ok: false, error: "PRIVATE" };
 
+  // First time here? Create the account now (already confirmed). Otherwise
+  // Supabase would send its "Confirm your email" sign-UP email, which has only
+  // a link — and USC's mail scanner uses that link up before the student can.
+  // This way every student always gets the sign-IN email with a 6-digit code.
+  const { error: createErr } = await admin.auth.admin.createUser({ email: parsed.data, email_confirm: true });
+  if (createErr && createErr.code !== "email_exists" && !/already/i.test(createErr.message)) {
+    console.error("createUser failed:", createErr.code, createErr.message);
+    return { ok: false, error: "We couldn't set up your account. Please try again in a moment." };
+  }
+
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithOtp({
     email: parsed.data,
     options: {
-      // Allowed emails get an account on first sign-in (Supabase sign-ups must be ON).
-      shouldCreateUser: true,
+      shouldCreateUser: false, // the account was just made above
       emailRedirectTo: `${await siteOrigin()}/auth/confirm`,
     },
   });
   if (error) {
+    console.error("signInWithOtp failed:", error.code, error.message);
     const msg = `${error.code ?? ""} ${error.message}`.toLowerCase();
     if (msg.includes("rate") || error.status === 429) return { ok: false, error: "Too many sign-in emails. Wait a minute, then try again." };
     if (msg.includes("signup") || msg.includes("otp_disabled") || msg.includes("not found") || error.status === 422)
@@ -94,7 +105,12 @@ export async function verifySignInCode(rawEmail: string, rawCode: string): Promi
   if (!email.success || !code.success) return { ok: false, error: "Enter the code from the email" };
   const supabase = await createClient();
   const { error } = await supabase.auth.verifyOtp({ email: email.data, token: code.data, type: "email" });
-  if (error) return { ok: false, error: "That code didn't work. It may have expired — request a new one." };
+  if (error) {
+    // Log only the reason (never the email or code) so it shows in Vercel -> Logs.
+    console.error("verifyOtp failed:", error.code, error.message);
+    const expired = error.code === "otp_expired" || /expired|invalid/i.test(error.message);
+    return { ok: false, error: expired ? "That code is wrong or expired. Use the code from the newest email, or tap Resend." : "That code didn't work. Please try again." };
+  }
   const { data: allowed } = await supabase.rpc("is_allowlisted");
   if (!allowed) {
     await supabase.auth.signOut();
