@@ -1,148 +1,202 @@
-import { BUDGETS, findDestination, type MergeChange, type MergedPlan, type Plan, type TripProfile } from "./trip-data";
+// ============================================================================
+// matching.ts — deterministic matching (no AI, no randomness).
+//
+// Same inputs always produce the same matches in the same order.
+//
+//   scorePair()      -> is a pair eligible, what's their 0–100 score, and why
+//   findPairMatches  -> the signed-in user's top pair matches
+//   findGroupMatches -> the signed-in user's top 3–4 person groups
+// ============================================================================
+import { findDestination, vibeLabel } from "./catalog";
+import { MAX_GROUP_SIZE, MAX_RESULTS, MIN_GROUP_SIZE, MIN_MATCH_SCORE, WEIGHTS } from "./constants";
+import { formatRange } from "./dates";
+import { acceptedDestinations, budgetFit, dateFit, destinationFit, jaccard } from "./feasibility";
+import type { Person } from "./types";
 
-const DAY = 86400000;
-const toDate = (s: string) => new Date(s + "T00:00:00Z").getTime();
-const fromDate = (t: number) => new Date(t).toISOString().slice(0, 10);
-export const daysBetween = (a: string, b: string) => Math.round((toDate(b) - toDate(a)) / DAY);
+export type Blocker = "dates" | "destination" | "budget" | "score";
 
-export function planOf(p: TripProfile): Plan {
-  return { destination: p.destinations[0] ?? "", start_date: p.start_date, end_date: p.end_date };
-}
+export type PairResult = {
+  eligible: boolean;
+  blockers: Blocker[];
+  score: number;
+  parts: { dates: number; destination: number; budget: number; vibes: number };
+  reasons: string[];
+};
 
-export type Match = { profile: TripProfile; score: number; reasons: string[] };
+// Stable id for a set of people: sorted ids joined by commas.
+// The database uses the same format for proposals.member_key and passes.
+export const memberKey = (ids: string[]) => [...ids].sort().join(",");
 
-export function scoreMatch(me: TripProfile, them: TripProfile): Match | null {
-  if (me.break_id !== them.break_id || me.id === them.id) return null;
-  let score = 0;
+const placeName = (id: string | null) => (id ? findDestination(id)?.name ?? id : "");
+const money = (n: number) => `$${n.toLocaleString("en-US")}`;
+const listWords = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+
+// ---------------------------------------------------------------------------
+// Pair score, written from `me`'s point of view (reasons say "you" and their name).
+// ---------------------------------------------------------------------------
+export function scorePair(me: Person, them: Person, today: string): PairResult {
+  const plans = [me.plan, them.plan];
+
+  // 1. Hard constraints
+  const d = dateFit(plans, today);
+  const dest = destinationFit(plans);
+  const b = budgetFit(plans);
+  const blockers: Blocker[] = [];
+  if (!d.feasible) blockers.push("dates");
+  if (!dest.feasible) blockers.push("destination");
+  if (!b.feasible) blockers.push("budget");
+
+  // 2. Weighted score, each part 0..1 times its weight
+  const v = jaccard(me.plan.vibes, them.plan.vibes);
+  const parts = {
+    dates: WEIGHTS.dates * d.ratio,
+    destination: WEIGHTS.destination * dest.ratio,
+    budget: WEIGHTS.budget * b.ratio,
+    vibes: WEIGHTS.vibes * v,
+  };
+  const score = blockers.length ? 0 : Math.round(parts.dates + parts.destination + parts.budget + parts.vibes);
+  if (!blockers.length && score < MIN_MATCH_SCORE) blockers.push("score");
+
+  // 3. Reasons — only ever built from the actual plan data above.
   const reasons: string[] = [];
-
-  // 1. Vibe fit (always first chip)
-  const shared = me.vibes.filter((v) => them.vibes.includes(v));
-  if (shared.length) {
-    score += 15 + 10 * Math.min(shared.length, 2);
-    reasons.push(`Both want ${shared.map((v) => v.toLowerCase()).join(" + ")}`);
-  } else {
-    reasons.push(`Vibe mix: ${[...me.vibes, ...them.vibes].map((v) => v.toLowerCase()).join(" / ")}`);
-  }
-
-  // 2. Destination overlap
-  const myTop = me.destinations[0]?.toLowerCase();
-  const theirs = them.destinations.map((x) => x.toLowerCase());
-  if (myTop && theirs[0] === myTop) {
-    score += 35;
-    reasons.push("Same destination");
-  } else {
-    const common = me.destinations.find((x) => theirs.includes(x.toLowerCase()));
-    if (common) {
-      score += 20;
-      reasons.push(`Both considering ${common}`);
+  if (!blockers.includes("dates") && !blockers.includes("destination")) {
+    const mine = acceptedDestinations(me.plan).get(dest.best!);
+    const theirs = acceptedDestinations(them.plan).get(dest.best!);
+    const where = placeName(dest.best);
+    const when = formatRange(d.overlap!);
+    if (mine?.kind === "listed" && theirs?.kind === "listed") reasons.push(`You both want ${where} and overlap ${when}`);
+    else {
+      if (mine?.kind === "listed") reasons.push(`${where} is on your list and works for ${them.name}`);
+      else if (theirs?.kind === "listed") reasons.push(`${them.name} wants ${where}, which fits your plan`);
+      else reasons.push(`You're both flexible on destination — ${where} fits you both`);
+      reasons.push(`You can both travel ${when} (a ${d.days}-day trip fits)`);
     }
   }
+  if (b.feasible) reasons.push(`Budgets overlap at ${money(b.low)}–${money(b.high)}`);
+  const sharedVibes = me.plan.vibes.filter((x) => them.plan.vibes.includes(x));
+  if (sharedVibes.length) reasons.push(`You share: ${sharedVibes.map(vibeLabel).join(", ")}`);
+  if (them.plan.bringing_car && !me.plan.bringing_car)
+    reasons.push(`${them.name} can bring a car${them.plan.seats_offered ? ` with ${them.plan.seats_offered} open ${them.plan.seats_offered === 1 ? "seat" : "seats"}` : ""}`);
 
-  // 3. Dates
-  const diff = Math.abs(daysBetween(me.start_date, them.start_date));
-  if (diff === 0) {
-    score += 20;
-    reasons.push("Same dates");
-  } else if (diff <= 2) {
-    score += 15;
-    reasons.push("Dates within 2 days");
-  } else if (diff <= 5) {
-    score += 6;
-  }
-
-  // 4. Budget
-  const bi = (b: string) => BUDGETS.findIndex((x) => x.id === b);
-  const bd = Math.abs(bi(me.budget) - bi(them.budget));
-  if (bd === 0) {
-    score += 10;
-    reasons.push("Same budget");
-  } else if (bd === 1) score += 4;
-
-  // 5. Car complement
-  const dest = findDestination(me.break_id, me.destinations[0] ?? "");
-  if (dest?.car && !me.gear.includes("car") && them.gear.includes("car")) {
-    score += 5;
-    reasons.push("They have a car");
-  }
-
-  if (reasons.length < 2) reasons.push(diff <= 5 ? `Dates ${diff} days apart` : "Same break");
-  return { profile: them, score: Math.min(99, score), reasons: reasons.slice(0, 3) };
+  return { eligible: blockers.length === 0, blockers, score, parts, reasons: reasons.slice(0, 4) };
 }
 
-export function rankMatches(me: TripProfile, pool: TripProfile[], limit = 5): Match[] {
-  return pool
-    .map((p) => scoreMatch(me, p))
-    .filter((m): m is Match => !!m && m.score >= 25)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+export type PairMatch = { person: Person; score: number; reasons: string[] };
+
+export type MatchSummary = {
+  pairs: PairMatch[];
+  // How many classmates were ruled out by each reason — for the "no matches" empty state.
+  blockedBy: Record<Blocker, number>;
+  considered: number;
+};
+
+// Top pair matches for `me` among `others` (already filtered to completed
+// profiles with a plan; `passedIds` are people `me` has passed on).
+export function findPairMatches(me: Person, others: Person[], passedIds: Set<string>, today: string): MatchSummary {
+  const blockedBy: Record<Blocker, number> = { dates: 0, destination: 0, budget: 0, score: 0 };
+  const pairs: PairMatch[] = [];
+  const pool = others.filter((o) => o.id !== me.id && !passedIds.has(o.id));
+  for (const o of pool) {
+    const r = scorePair(me, o, today);
+    if (r.eligible) pairs.push({ person: o, score: r.score, reasons: r.reasons });
+    else for (const bl of r.blockers) blockedBy[bl]++;
+  }
+  // Highest score first; ties broken by user id so the order never changes randomly.
+  pairs.sort((a, b) => b.score - a.score || (a.person.id < b.person.id ? -1 : 1));
+  return { pairs: pairs.slice(0, MAX_RESULTS), blockedBy, considered: pool.length };
 }
 
-/** Deterministic merge used when AI is unavailable. */
-export function mergeRules(me: TripProfile, them: TripProfile, override?: Partial<Plan>): MergedPlan {
-  const mine = { ...planOf(me), ...override };
-  const theirs = planOf(them);
-  const changes: MergeChange[] = [];
+// ---------------------------------------------------------------------------
+// Groups of 3–4 (including `me`)
+// ---------------------------------------------------------------------------
+export type GroupMatch = {
+  members: Person[]; // the OTHER members (not including me)
+  key: string; // memberKey of everyone including me
+  score: number; // mean of all pair scores
+  weakestPair: number;
+  reasons: string[];
+};
 
-  let destination = mine.destination;
-  if (!override?.destination && mine.destination.toLowerCase() !== theirs.destination.toLowerCase()) {
-    const common = me.destinations.find((x) => them.destinations.some((y) => y.toLowerCase() === x.toLowerCase()));
-    if (common) {
-      destination = common;
-      if (common !== mine.destination)
-        changes.push({ field: "Destination", from: mine.destination, to: common, reason: `${common} is on both of your lists.` });
-      else changes.push({ field: "Destination", from: theirs.destination, to: common, reason: `${them.first_name} also ranked ${common}.` });
-    } else {
-      changes.push({ field: "Destination", from: theirs.destination, to: destination, reason: `Kept your top pick; ${them.first_name}'s vibe fits it.` });
+// All ways to choose k items from a list (small lists only: 5 classmates -> at most 10 combos).
+function combinations<T>(items: T[], k: number): T[][] {
+  if (k === 0) return [[]];
+  if (items.length < k) return [];
+  const [first, ...rest] = items;
+  return [...combinations(rest, k - 1).map((c) => [first, ...c]), ...combinations(rest, k)];
+}
+
+const countWord = (n: number) => ["", "one", "two", "three", "four", "five", "six"][n] ?? String(n);
+
+export function scoreGroup(group: Person[], today: string): { eligible: boolean; score: number; weakest: number; reasons: string[] } {
+  const fail = { eligible: false, score: 0, weakest: 0, reasons: [] };
+
+  // Every pair must be eligible on its own and score at least MIN_MATCH_SCORE.
+  const pairScores: number[] = [];
+  for (let i = 0; i < group.length; i++)
+    for (let j = i + 1; j < group.length; j++) {
+      const r = scorePair(group[i], group[j], today);
+      if (!r.eligible) return fail;
+      pairScores.push(r.score);
+    }
+
+  // Pairs can each be fine in different ways, so check the whole group too.
+  const plans = group.map((p) => p.plan);
+  const d = dateFit(plans, today);
+  const dest = destinationFit(plans);
+  const b = budgetFit(plans);
+  if (!d.feasible || !dest.feasible || !b.feasible) return fail;
+
+  const score = Math.round(pairScores.reduce((s, x) => s + x, 0) / pairScores.length);
+  const weakest = Math.min(...pairScores);
+  const all = `All ${countWord(group.length)} of you`;
+  const reasons: string[] = [];
+  reasons.push(`${all} can travel ${formatRange(d.trip!)}`);
+
+  const where = placeName(dest.best);
+  const listedByAll = group.every((p) => p.plan.destinations.includes(dest.best!));
+  reasons.push(listedByAll ? `Everyone listed ${where}` : `${where} works for everyone`);
+  reasons.push(`All ${countWord(group.length)} budgets overlap between $${b.low} and $${b.high}`);
+
+  // Vibes: shared by everyone, or by most — with an honest tradeoff if someone differs.
+  const counts = new Map<string, number>();
+  for (const p of group) for (const v of p.plan.vibes) counts.set(v, (counts.get(v) ?? 0) + 1);
+  const everyone = [...counts].filter(([, c]) => c === group.length).map(([v]) => vibeLabel(v));
+  const most = [...counts].filter(([, c]) => c >= 2 && c < group.length).map(([v]) => v);
+  if (everyone.length) reasons.push(`Everyone's into ${listWords(everyone)}`);
+  else if (most.length) {
+    const top = most.slice(0, 2);
+    const sharing = group.filter((p) => top.some((v) => p.plan.vibes.includes(v as never)));
+    const outsiders = group.filter((p) => !sharing.includes(p));
+    let text = `${countWord(sharing.length)[0].toUpperCase()}${countWord(sharing.length).slice(1)} of you share ${listWords(top.map(vibeLabel))}`;
+    if (outsiders.length === 1) {
+      const o = outsiders[0];
+      text += o.plan.vibes.length ? `; ${o.name} prefers ${listWords(o.plan.vibes.map(vibeLabel))}` : "";
+    }
+    reasons.push(text);
+  }
+
+  // Tradeoff: shorter trip than someone hoped for.
+  const shortchanged = group.filter((p) => p.plan.trip_length_max > d.days && p.plan.timing_mode === "break" && p.plan.date_mode !== "fixed");
+  if (shortchanged.length === 1)
+    reasons.push(`Tradeoff: ${d.days} days is shorter than the ${shortchanged[0].plan.trip_length_max} ${shortchanged[0].name} hoped for`);
+
+  return { eligible: true, score, weakest, reasons };
+}
+
+// passedKeys: group keys the user passed on. passedIds: people the user passed on
+// (passing on a person also hides groups that include them).
+export function findGroupMatches(me: Person, others: Person[], passedIds: Set<string>, passedKeys: Set<string>, today: string): GroupMatch[] {
+  const pool = others.filter((o) => o.id !== me.id && !passedIds.has(o.id)).sort((a, b) => (a.id < b.id ? -1 : 1));
+  const out: GroupMatch[] = [];
+  for (let size = MIN_GROUP_SIZE; size <= MAX_GROUP_SIZE; size++) {
+    for (const combo of combinations(pool, size - 1)) {
+      const key = memberKey([me.id, ...combo.map((p) => p.id)]);
+      if (passedKeys.has(key)) continue;
+      const r = scoreGroup([me, ...combo], today);
+      if (r.eligible) out.push({ members: combo, key, score: r.score, weakestPair: r.weakest, reasons: r.reasons });
     }
   }
-
-  let start = mine.start_date;
-  let end = mine.end_date;
-  if (!override?.start_date && (mine.start_date !== theirs.start_date || mine.end_date !== theirs.end_date)) {
-    const s = Math.max(toDate(mine.start_date), toDate(theirs.start_date));
-    const e = Math.min(toDate(mine.end_date), toDate(theirs.end_date));
-    if (e >= s) {
-      start = fromDate(s);
-      end = fromDate(e);
-      changes.push({ field: "Dates", from: `${mine.start_date} → ${mine.end_date}`, to: `${start} → ${end}`, reason: "Trimmed to the days you're both free." });
-    } else {
-      const len = Math.max(1, daysBetween(mine.start_date, mine.end_date));
-      const mid = (toDate(mine.start_date) + toDate(theirs.start_date)) / 2;
-      start = fromDate(Math.round(mid / DAY) * DAY);
-      end = fromDate(toDate(start) + len * DAY);
-      changes.push({ field: "Dates", from: `${mine.start_date} → ${mine.end_date}`, to: `${start} → ${end}`, reason: "Shifted to meet halfway between your two date ranges." });
-    }
-  }
-
-  return {
-    destination,
-    start_date: start,
-    end_date: end,
-    changes,
-    summary: changes.length ? `A compromise trip to ${destination} that works for both of you.` : `You already agree — ${destination} it is!`,
-  };
-}
-
-export function buildItinerary(breakId: TripProfile["break_id"], plan: Plan, travelers: TripProfile[]) {
-  const dest = findDestination(breakId, plan.destination);
-  const n = Math.max(1, daysBetween(plan.start_date, plan.end_date) + 1);
-  const acts = dest?.activities ?? ["Arrive & explore", "Local highlights", "Free day", "Head home"];
-  const days = Array.from({ length: n }, (_, i) => ({
-    date: fromDate(toDate(plan.start_date) + i * DAY),
-    activity: acts[i % acts.length],
-  }));
-  const budgetMid = (b: string) => BUDGETS.find((x) => x.id === b)?.mid ?? 500;
-  const perPerson = dest
-    ? Math.round((dest.min + dest.max) / 2)
-    : Math.round(travelers.reduce((s, t) => s + budgetMid(t.budget), 0) / travelers.length);
-  const shared = Math.round(perPerson * 0.6 * travelers.length); // lodging + car/gas
-  return {
-    days,
-    total: perPerson * travelers.length,
-    sharedCosts: shared,
-    perPerson,
-    needsCar: !!dest?.car,
-    driver: dest?.car ? travelers.find((t) => t.gear.includes("car"))?.first_name ?? null : null,
-  };
+  // Highest group score, then the strongest weakest pair, then sorted ids.
+  out.sort((a, b) => b.score - a.score || b.weakestPair - a.weakestPair || (a.key < b.key ? -1 : 1));
+  return out.slice(0, MAX_RESULTS);
 }
