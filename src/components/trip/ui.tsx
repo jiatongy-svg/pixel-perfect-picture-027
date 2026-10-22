@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-export function Screen({ children, step }: { children: ReactNode; step?: string }) {
+export function Screen({ children, step }: { children: ReactNode; step?: string | undefined }) {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col px-5 pb-10 pt-6">
       <header className="mb-6 flex items-center justify-between">
