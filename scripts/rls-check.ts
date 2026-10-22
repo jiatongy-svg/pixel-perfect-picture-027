@@ -9,7 +9,7 @@
 // ============================================================================
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const url = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).origin;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const service = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const emails = (process.env.PILOT_ALLOWLIST ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);

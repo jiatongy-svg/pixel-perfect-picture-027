@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { cleanSupabaseUrl } from "@/lib/env";
 import { fieldErrors, planSchema, profileSchema } from "@/lib/validation";
 import { TODAY } from "./helpers";
 
@@ -57,5 +58,13 @@ describe("profile validation", () => {
   it("zeroes seats when there's no car", () => {
     const r = profileSchema.safeParse({ ...base, car_seats: 4 });
     expect(r.success && r.data.car_seats).toBe(0);
+  });
+});
+
+describe("Supabase URL cleanup", () => {
+  it("accepts the Project URL or the REST URL", () => {
+    expect(cleanSupabaseUrl("https://abcd.supabase.co")).toBe("https://abcd.supabase.co");
+    expect(cleanSupabaseUrl("https://abcd.supabase.co/rest/v1/")).toBe("https://abcd.supabase.co");
+    expect(cleanSupabaseUrl(" https://abcd.supabase.co/ ")).toBe("https://abcd.supabase.co");
   });
 });

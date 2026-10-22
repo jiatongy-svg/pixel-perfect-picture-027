@@ -20,7 +20,7 @@ function mask(email: string) {
 }
 
 async function main() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin : undefined;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const raw = process.env.PILOT_ALLOWLIST;
   if (!url || !key || !raw) {
