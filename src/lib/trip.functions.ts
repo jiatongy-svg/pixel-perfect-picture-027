@@ -15,6 +15,9 @@ export const saveProfile = createServerFn({ method: "POST" })
     return d;
   })
   .handler(async ({ data }) => {
+    const { verifiedEmail } = await import("./trip-access.server");
+    const email = await verifiedEmail();
+    if (email && data.email.toLowerCase() !== email) throw new Error("Use the email from your USC sign-in.");
     const db = await admin();
     const { data: row, error } = await db
       .from("trip_profiles")
@@ -28,6 +31,8 @@ export const saveProfile = createServerFn({ method: "POST" })
 export const getMatches = createServerFn({ method: "POST" })
   .inputValidator((d: { profileId: string }) => d)
   .handler(async ({ data }) => {
+    const { requireProfileOwner } = await import("./trip-access.server");
+    await requireProfileOwner(data.profileId);
     const db = await admin();
     const { data: me } = await db.from("trip_profiles").select().eq("id", data.profileId).single();
     if (!me) throw new Error("Profile not found");
@@ -123,6 +128,8 @@ async function aiMerge(me: TripProfile, them: TripProfile, rules: MergedPlan, ov
 export const proposeMerge = createServerFn({ method: "POST" })
   .inputValidator((d: { profileId: string; matchId: string; override?: Partial<Plan> | undefined }) => d)
   .handler(async ({ data }) => {
+    const { requireProfileOwner } = await import("./trip-access.server");
+    await requireProfileOwner(data.profileId);
     const db = await admin();
     const { data: rows } = await db.from("trip_profiles").select().in("id", [data.profileId, data.matchId]);
     const me = rows?.find((r) => r.id === data.profileId);
@@ -149,6 +156,8 @@ export const proposeMerge = createServerFn({ method: "POST" })
 export const decide = createServerFn({ method: "POST" })
   .inputValidator((d: { proposalId: string; status: "accepted" | "passed" }) => d)
   .handler(async ({ data }) => {
+    const { requireProposalAccess } = await import("./trip-access.server");
+    await requireProposalAccess(data.proposalId, true);
     const db = await admin();
     const { error } = await db.from("proposals").update({ status: data.status, updated_at: new Date().toISOString() }).eq("id", data.proposalId);
     if (error) throw new Error(error.message);
@@ -158,6 +167,8 @@ export const decide = createServerFn({ method: "POST" })
 export const getItinerary = createServerFn({ method: "POST" })
   .inputValidator((d: { proposalId: string }) => d)
   .handler(async ({ data }) => {
+    const { requireProposalAccess } = await import("./trip-access.server");
+    await requireProposalAccess(data.proposalId, false);
     const db = await admin();
     const { data: prop } = await db.from("proposals").select().eq("id", data.proposalId).single();
     if (!prop) throw new Error("Trip not found");

@@ -2,6 +2,9 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { Chip, GhostButton, Option, PrimaryButton, Screen } from "@/components/trip/ui";
+import { SignInScreen } from "@/components/trip/SignInScreen";
+import { isUscEmail, uscSsoEnabled } from "@/lib/sign-in";
+import { supabase } from "@/integrations/supabase/client";
 import type { Match } from "@/lib/matching";
 import { decide, getMatches, proposeMerge, saveProfile } from "@/lib/trip.functions";
 import {
@@ -51,10 +54,58 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const [restoring, setRestoring] = useState(uscSsoEnabled);
   useEffect(() => {
-    const e = localStorage.getItem("tm_email");
-    if (e) { setEmail(e); setStep("entry"); }
+    if (!uscSsoEnabled) {
+      const e = localStorage.getItem("tm_email");
+      if (e && isUscEmail(e)) { setEmail(e); setStep("entry"); }
+      return;
+    }
+    // A stored email alone never counts as an authenticated SSO session.
+    let active = true;
+    let version = 0;
+    async function restore() {
+      const current = ++version;
+      try {
+        const { data, error } = await supabase.auth.getUser();
+        if (!active || current !== version) return;
+        const user = data.user;
+        if (!error && user?.email && user.email_confirmed_at && isUscEmail(user.email)) {
+          setEmail(user.email); setStep("entry");
+        } else { setEmail(""); setStep("signin"); }
+      } catch {
+        if (active && current === version) setErr("Could not restore your sign-in. Please try again.");
+      } finally { if (active && current === version) setRestoring(false); }
+    }
+    void restore();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      // Defer auth calls until the auth event handler has released its lock.
+      window.setTimeout(() => { if (active) void restore(); }, 0);
+    });
+    return () => { active = false; subscription.unsubscribe(); };
   }, []);
+
+  async function startSso() {
+    const { data, error } = await supabase.auth.signInWithSSO({
+      domain: "usc.edu",
+      options: { redirectTo: window.location.origin + "/" },
+    });
+    if (error || !data?.url) throw new Error("USC SSO is not configured");
+    const target = new URL(data.url);
+    if (target.protocol !== "https:") throw new Error("Invalid SSO redirect");
+    window.location.assign(target.href);
+  }
+
+  async function signOut() {
+    await run(async () => {
+      if (uscSsoEnabled) {
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
+      }
+      localStorage.removeItem("tm_email");
+      setEmail(""); setProfileId(null); setMatches([]); setProposal(null); setStep("signin");
+    });
+  }
 
   const total = 5;
   const firstName = (() => {
@@ -97,25 +148,12 @@ function App() {
 
   // ---------- Screens ----------
   if (step === "signin") {
-    const valid = /^[^@\s]+@usc\.edu$/i.test(email.trim());
-    return (
-      <Screen>
-        <div className="flex flex-1 flex-col justify-center">
-          <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-primary">USC Marshall · MSBA</p>
-          <h1 className="text-4xl font-extrabold leading-tight">Break's coming.<br />Find your travel crew.</h1>
-          <p className="mt-3 text-muted-foreground">Get matched with classmates — even when your plans don't line up perfectly.</p>
-          <label className="mt-10 mb-2 block text-sm font-semibold">USC email</label>
-          <input
-            type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ttrojan@usc.edu"
-            className="h-14 w-full rounded-2xl border-2 border-border bg-card px-4 text-base outline-none focus:border-primary"
-          />
-          {email && !valid && <p className="mt-2 text-sm text-destructive">Use your @usc.edu address.</p>}
-          <PrimaryButton className="mt-4" disabled={!valid} onClick={() => { const e = email.trim().toLowerCase(); setEmail(e); localStorage.setItem("tm_email", e); setStep("entry"); }}>
-            Continue with USC email
-          </PrimaryButton>
-        </div>
-      </Screen>
-    );
+    return <SignInScreen email={email} onEmailChange={setEmail} ssoEnabled={uscSsoEnabled}
+      onSso={startSso} restoring={restoring} error={err}
+      onContinue={() => {
+        const e = email.trim().toLowerCase();
+        setEmail(e); localStorage.setItem("tm_email", e); setStep("entry");
+      }} />;
   }
 
   if (step === "entry") {
@@ -133,9 +171,10 @@ function App() {
             <div className="text-sm text-muted-foreground">Enter your destination and dates</div>
           </Option>
         </div>
-        <button className="mt-auto pt-10 text-sm text-muted-foreground underline" onClick={() => { localStorage.removeItem("tm_email"); setEmail(""); setStep("signin"); }}>
+        <button className="mt-auto pt-10 text-sm text-muted-foreground underline" disabled={busy} onClick={signOut}>
           Not {email}? Sign out
         </button>
+        {err && <p role="alert" className="mt-3 text-sm text-destructive">{err}</p>}
       </Screen>
     );
   }
