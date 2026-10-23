@@ -175,17 +175,29 @@ export async function loadProposals(supabase: Supabase, onlyId?: string) {
 }
 export type LoadedProposal = Awaited<ReturnType<typeof loadProposals>>[number];
 
-// The plans a proposal is about, as they are NOW (for countering). The plan ids
-// come from the current version's snapshots; proposals made before students
-// could have several plans fall back to each member's most recent plan.
-// Returns null if any of those plans was deleted.
+// The plans a trip is about, as they are NOW (for the final-plan checklist).
+// Which plan each member brought comes from the trip's plan_key (and the
+// snapshots, for trips made before students could have several plans) —
+// never "their most recent plan", which may be a different trip entirely.
+// If a plan was since deleted or closed, the snapshot taken at match time is
+// used instead. Members who joined from Discover brought no plan: they took
+// the trip as it was, so they add no constraints.
 export async function proposalPeople(supabase: Supabase, p: LoadedProposal): Promise<Person[] | null> {
-  const planIds = p.current.snapshots.map((s) => s.plan?.id).filter((x): x is string => !!x);
-  if (planIds.length === p.people.length) {
-    const found = await loadPeople(supabase, { planIds });
-    return found.length === planIds.length ? found : null;
+  const snapshots = p.current.snapshots ?? [];
+  const planIds = [...new Set([...(p.plan_key ?? "").split(","), ...snapshots.map((s) => s.plan?.id)].filter((x): x is string => !!x && /^[0-9a-f-]{36}$/.test(x)))];
+  const memberIds = p.people.map((m) => m.id);
+  const [live, { data: profiles }] = await Promise.all([
+    planIds.length ? loadPeople(supabase, { planIds }) : Promise.resolve([] as Person[]),
+    supabase.from("profiles").select("*").in("id", memberIds),
+  ]);
+  const profileBy = new Map(((profiles ?? []) as Profile[]).map((x) => [x.id, x]));
+  const out: Person[] = [];
+  for (const id of memberIds) {
+    const now = live.find((x) => x.id === id);
+    const snap = snapshots.find((s) => s.user_id === id);
+    const profile = profileBy.get(id);
+    if (now) out.push(now);
+    else if (snap?.plan && profile) out.push(toPerson(profile, snap.plan));
   }
-  const byUser = await loadPeople(supabase, { userIds: p.people.map((m) => m.id) });
-  const firstEach = p.people.map((m) => byUser.find((x) => x.id === m.id));
-  return firstEach.every(Boolean) ? (firstEach as Person[]) : null;
+  return out.length ? out : null;
 }
