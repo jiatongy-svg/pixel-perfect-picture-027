@@ -24,6 +24,7 @@ Phone/laptop ──HTTPS──> Next.js on Vercel ──> Supabase (sign-in + Po
 ```
 
 - **Sign-in:** the student types their email and gets a one-time code (or link). Who may sign in is decided in the database: individual emails in `allowed_emails`, plus whole domains in `allowed_domains` (currently `usc.edu`, so any USC student can join). The server checks this *before* sending a code, and RLS checks it again on every read and write.
+- **Demo sign-in (for presenting without signal):** set `DEMO_SIGNIN_EMAILS` (comma-separated) and `DEMO_SIGNIN_CODE` (8 digits) in Vercel and redeploy. Only those accounts can sign in with that fixed code, and no email is sent to them. Everyone else still gets an emailed code. Delete both variables afterwards to switch it off.
 - **Access modes:** to go back to a closed pilot, run `delete from public.allowed_domains where domain = 'usc.edu';` and turn off "Allow new users to sign up" in Supabase. To reopen, run `supabase/migrations/002_open_to_usc.sql` again.
 - **Who sees what:** you can read and edit only your own profile and plan. Classmates see your profile and the matching-relevant parts of your plan through the `plan_cards` view. They never see your email or your private notes. Only a proposal's members can see that proposal.
 - **No stale data:** every page is rendered fresh (`force-dynamic`), so matches always use the latest saved plans.
@@ -103,6 +104,7 @@ npm run rls-check  # security checks against the real Supabase project
 
 ## Changelog
 
+- **2026-10-22 (demo)** Optional fixed sign-in code for a few named demo accounts (`DEMO_SIGNIN_EMAILS` / `DEMO_SIGNIN_CODE`), for presenting where emails can't arrive. Off unless both are set.
 - **2026-10-22 (fixes 2)** One plan, one confirmed trip: if the same plan is in two pending trips and one confirms, the other can't be confirmed (the trip room says whose plan is booked). Database: `migrations/007_one_trip_per_plan.sql`.
 - **2026-10-22 (fixes)** A plan in a confirmed trip is now **booked**: it isn't matched again and isn't listed on Discover (no double-booking the same break); My plans shows a "Booked" badge, and leaving the trip frees the plan. The final-plan checklist now checks against the trip's own plans (older trips were compared with each member's newest plan). Calendar files escape semicolons correctly. Database: `migrations/006_booked_plans.sql`.
 - **2026-10-22 (late night)** Match / Discover redesign. Pairs and groups in one anonymous list; new score (dates 45, destination 20, group size 15, budget 10, style 10). Profile: driver's license, "can rent a car", travel vibe, preferred group size for weekends and long breaks (strict or flexible), and an optional contact. Plans: "I'm willing to drive", per-plan group size, "going no matter what" publishing. Proposals/counters are replaced by **My trips**: mutual Interested → group chat → final-plan checklist → everyone accepts → contacts + calendar export. Discover (formerly Explore) gains **Open trips** you can join or leave. No-match plans can end the search or post their own trip. Database: `migrations/005_trips_chat_groups.sql`.

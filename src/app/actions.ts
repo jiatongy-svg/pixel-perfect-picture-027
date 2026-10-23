@@ -13,10 +13,12 @@
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { AuthError } from "@supabase/supabase-js";
 import { z } from "zod";
 import { tryAiMerge } from "@/lib/ai-merge";
 import { PLAN_LIMITS, TRIPS } from "@/lib/constants";
 import { todayLA } from "@/lib/dates";
+import { demoCodeMatches, isDemoEmail } from "@/lib/demo-signin";
 import { getViewer, loadPeople, loadProposals, proposalPeople } from "@/lib/data";
 import { tripKind } from "@/lib/matching";
 import { mergePlans, type MergedTrip } from "@/lib/merge";
@@ -88,6 +90,10 @@ export async function sendSignInEmail(rawEmail: string): Promise<ActionResult> {
     return { ok: false, error: "We couldn't set up your account. Please try again in a moment." };
   }
 
+  // Demo accounts (presentations without signal) use the fixed demo code:
+  // no email is sent, so nothing has to arrive.
+  if (isDemoEmail(parsed.data)) return { ok: true };
+
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithOtp({
     email: parsed.data,
@@ -112,7 +118,9 @@ export async function verifySignInCode(rawEmail: string, rawCode: string): Promi
   const code = z.string().trim().regex(/^\d{6,8}$/, "Enter the code from the email").safeParse(rawCode);
   if (!email.success || !code.success) return { ok: false, error: "Enter the code from the email" };
   const supabase = await createClient();
-  const { error } = await supabase.auth.verifyOtp({ email: email.data, token: code.data, type: "email" });
+  const { error } = demoCodeMatches(email.data, code.data)
+    ? await demoSignIn(supabase, email.data)
+    : await supabase.auth.verifyOtp({ email: email.data, token: code.data, type: "email" });
   if (error) {
     // Log only the reason (never the email or code) so it shows in Vercel -> Logs.
     console.error("verifyOtp failed:", error.code, error.message);
@@ -125,6 +133,14 @@ export async function verifySignInCode(rawEmail: string, rawCode: string): Promi
     return { ok: false, error: "PRIVATE" };
   }
   redirect("/");
+}
+
+// The demo code was right: make a one-time sign-in token on the server (no
+// email is sent) and use it straight away, so the session is set as usual.
+async function demoSignIn(supabase: Awaited<ReturnType<typeof createClient>>, email: string) {
+  const { data, error } = await createAdminClient().auth.admin.generateLink({ type: "magiclink", email });
+  if (error || !data.properties?.hashed_token) return { error: error ?? new AuthError("Demo sign-in failed", 500, "demo_failed") };
+  return supabase.auth.verifyOtp({ token_hash: data.properties.hashed_token, type: "email" });
 }
 
 export async function signOut() {
