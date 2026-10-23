@@ -5,7 +5,7 @@ import { addDays } from "@/lib/dates";
 import type { MergedTrip } from "@/lib/merge";
 import { createClient } from "@/lib/supabase/server";
 
-const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
 const ymd = (iso: string) => iso.replaceAll("-", "");
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -95,7 +95,7 @@ it("004_multiple_plans keeps plans and open proposals, then allows more plans", 
   expect(r.rows[0].created).toBe(true);
 });
 
-it("005_trips_chat_groups applies on top of 002–004 (twice) and keeps data", async () => {
+it("005 and 006 apply on top of 002–004 (twice) and keeps data", async () => {
   const db = new PGlite();
   await db.exec(`
     create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
@@ -116,5 +116,8 @@ it("005_trips_chat_groups applies on top of 002–004 (twice) and keeps data", a
   const plan = (await db.query<{ status: string; group_pref: string | null }>("select status, group_pref from public.travel_plans")).rows[0];
   expect(plan).toEqual({ status: "active", group_pref: null });
   const prof = (await db.query<{ group_pref_long: string; has_license: boolean }>("select group_pref_long, has_license from public.profiles")).rows[0];
-  expect(prof).toEqual({ group_pref_long: "any", has_license: false });
+  expect(prof).toEqual({ group_pref_long: "any", has_license: false });  await db.exec(read("../supabase/migrations/006_booked_plans.sql"));
+  await db.exec(read("../supabase/migrations/006_booked_plans.sql")); // safe twice
+  expect((await db.query("select id from public.plan_cards")).rows).toHaveLength(0); // not allowlisted in this bare test db
+  expect((await db.query<{ b: boolean }>("select public.plan_is_booked(id, user_id) as b from public.travel_plans")).rows[0].b).toBe(false);
 });

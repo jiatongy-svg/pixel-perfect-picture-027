@@ -8,7 +8,7 @@ import { vibeLabel } from "@/lib/catalog";
 import { PLAN_LIMITS } from "@/lib/constants";
 import { todayLA } from "@/lib/dates";
 import { budgetText, whenText, whereText } from "@/lib/describe";
-import { getOnboardedViewer, planName } from "@/lib/data";
+import { getOnboardedViewer, loadProposals, planName } from "@/lib/data";
 import { ReopenPlanButton } from "@/components/TripButtons";
 import { Badge, EmptyState, Notice, PageHeader } from "@/components/ui";
 
@@ -18,7 +18,10 @@ const addButton = "inline-flex h-11 items-center gap-2 rounded-md bg-accent px-4
 
 export default async function PlansPage({ searchParams }: { searchParams: Promise<{ saved?: string; deleted?: string }> }) {
   const { saved, deleted } = await searchParams;
-  const { plans } = await getOnboardedViewer();
+  const { supabase, plans } = await getOnboardedViewer();
+  // A plan in a confirmed trip is booked: it isn't matched again (no double-booking).
+  const tripOf = new Map<string, string>();
+  for (const t of await loadProposals(supabase)) if (t.status === "confirmed") for (const id of t.plan_key.split(",")) tripOf.set(id, t.id);
   const today = todayLA();
   const full = plans.length >= PLAN_LIMITS.maxPlans;
 
@@ -42,13 +45,16 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
             <li key={p.id} className="flex flex-col gap-2">
               <Link href={`/plans/${p.id}`} className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-surface-raised p-4 shadow-sm transition-colors duration-150 hover:bg-surface-hover active:bg-surface-active">
                 <div className="min-w-0 flex-1">
-                  <p className="flex min-w-0 items-center gap-2 font-semibold"><span className="truncate" title={planName(p)}>{planName(p)}</span>{p.status === "ended" && <Badge>Closed</Badge>}</p>
+                  <p className="flex min-w-0 items-center gap-2 font-semibold"><span className="truncate" title={planName(p)}>{planName(p)}</span>{p.status === "ended" ? <Badge>Closed</Badge> : tripOf.has(p.id) && <Badge tone="success">Booked</Badge>}</p>
                   <p className="truncate text-sm text-muted">{whereText(p)}</p>
                   <p className="text-sm text-muted">{whenText(p, today)} · {budgetText(p)}{p.vibes.length ? ` · ${p.vibes.map(vibeLabel).join(", ")}` : ""}</p>
                 </div>
                 <ChevronRight aria-hidden className="size-5 shrink-0 text-muted" />
               </Link>
               {p.status === "ended" && <div className="pl-1"><ReopenPlanButton planId={p.id} /></div>}
+              {p.status !== "ended" && tripOf.has(p.id) && (
+                <p className="pl-1 text-sm text-muted">Trip confirmed, so this plan isn&apos;t matched again. <Link href={`/trips/${tripOf.get(p.id)}`} className="font-medium text-accent-text underline-offset-4 hover:underline">Open the trip</Link></p>
+              )}
             </li>
           ))}
         </ul>

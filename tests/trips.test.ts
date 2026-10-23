@@ -104,6 +104,13 @@ describe("mutual interest opens a group chat", () => {
     expect(JSON.stringify(open[0].members)).not.toMatch(/ana|ben/);
   });
 
+  it("a confirmed trip's plans are booked: no longer matched, no second trip for them", async () => {
+    expect(await as("cy", "select id from public.plan_cards where id = any($1)", [[plan.ana, plan.ben]])).toHaveLength(0);
+    expect(await as("cy", "select id from public.plan_cards where id = $1", [plan.cy])).toHaveLength(1);
+    await expect(as("ana", "select * from public.express_interest($1)", [key("ana", "ben")])).rejects.toThrow(/BAD_INPUT/);
+    await expect(as("cy", "select * from public.express_interest($1)", [key("ana", "cy")])).rejects.toThrow(/BAD_INPUT/);
+  });
+
   it("join is instant up to the cap; Strict size preferences are respected", async () => {
     expect((await as<{ join_trip: number }>("cy", "select public.join_trip($1)", [trip]))[0].join_trip).toBe(3);
     // Dee only wants pairs, strictly: joining would make 4.
