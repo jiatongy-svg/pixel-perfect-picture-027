@@ -36,6 +36,7 @@ function friendlyDbError(message: string | undefined): string {
   if (message.includes("NOT_PENDING")) return "This trip is already settled. Refresh to see its latest status.";
   if (message.includes("NOT_MEMBER")) return "You're not part of this trip.";
   if (message.includes("GROUP_SIZE_STRICT")) return "Joining would make this group bigger than your strict group-size limit. You can change it on your profile.";
+  if (message.includes("ALREADY_BOOKED")) return "Someone's plan for this trip is already booked in another confirmed trip, so this one can't be confirmed.";
   if (message.includes("FULL")) return "This trip just filled up.";
   if (message.includes("NOT_OPEN")) return "Sign-ups for this trip are closed.";
   if (message.includes("not everyone is interested")) return "Not everyone is interested yet.";

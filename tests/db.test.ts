@@ -206,8 +206,15 @@ describe("proposals", () => {
     await expect(as("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, [await pick("ana"), await planOf("ana")], merged])).rejects.toThrow(/BAD_INPUT/);
   });
 
-  it("groups of three need all three approvals", async () => {
-    const r = await as<{ proposal_id: string }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, await plansOf("ana", "ben", "cy"), merged]);
+  it("groups of three need all three approvals (with plans not already booked)", async () => {
+    // These plans are in a confirmed trip already -> a new trip with them can't be accepted.
+    const booked = (await as<{ proposal_id: string }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, await plansOf("ana", "ben", "cy"), merged]))[0].proposal_id;
+    await expect(as("ben", "select public.accept_proposal($1, 1)", [booked])).rejects.toThrow(/ALREADY_BOOKED/);
+    // Fresh plans for another break work as before.
+    await db.exec("reset role;");
+    const fresh: string[] = [];
+    for (const w of ["ana", "ben", "cy"] as const) fresh.push((await db.query<{ id: string }>(planSql(ids[w], "spring").replace("'thanksgiving'", "'spring'") + " returning id")).rows[0].id);
+    const r = await as<{ proposal_id: string }>("service", "select * from public.create_proposal($1, $2, '[]'::jsonb, $3::jsonb)", [ids.ana, fresh, merged]);
     const g = r[0].proposal_id;
     expect((await as("ben", "select public.accept_proposal($1, 1) as s", [g]))[0].s).toBe("pending");
     expect((await as("cy", "select public.accept_proposal($1, 1) as s", [g]))[0].s).toBe("confirmed");

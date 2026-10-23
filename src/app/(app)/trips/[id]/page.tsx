@@ -40,12 +40,16 @@ export default async function TripRoom({ params, searchParams }: { params: Promi
   const confirmed = p.status === "confirmed";
   const urls = await photoUrls(supabase, p.people.map((m) => m.photo_path));
 
-  const [messages, { data: mine }, contacts, live] = await Promise.all([
+  const [messages, { data: mine }, contacts, live, { data: booked }] = await Promise.all([
     getMessages(id),
     supabase.from("proposal_members").select("ack_size").eq("proposal_id", id).eq("user_id", userId).maybeSingle(),
     confirmed ? supabase.rpc("trip_contacts", { p_proposal: id }) : Promise.resolve({ data: [] }),
     pending ? proposalPeople(supabase, p) : Promise.resolve(null),
+    pending ? supabase.rpc("booked_member", { p_proposal: id }) : Promise.resolve({ data: null }),
   ]);
+  // One plan, one confirmed trip: if someone's plan got booked elsewhere, this one can't be confirmed.
+  const bookedName = (booked as string | null) ?? null;
+  const canSettle = pending && !bookedName;
 
   // "The group grew beyond your preferred size."
   const myPref = p.trip_kind === "weekend" ? profile.group_pref_weekend : profile.group_pref_long;
@@ -69,6 +73,13 @@ export default async function TripRoom({ params, searchParams }: { params: Promi
       {sp.joined && <Notice tone="success" title="You're in.">You joined this trip as it is. Say hi to the group below.</Notice>}
       {sp.published && <Notice tone="success" title="Posted to Discover.">Classmates can now join your trip until sign-ups close.</Notice>}
       {grew && <GroupGrewNotice tripId={id} size={p.size} prefLabel={prefLabel(myPref)} />}
+      {bookedName && (
+        <Notice tone="warning" title={bookedName === me.display_name ? "Your plan for this trip is already booked." : `${bookedName}'s plan for this trip is already booked.`}>
+          {bookedName === me.display_name
+            ? "You confirmed another trip with this plan, so this one can't be confirmed. Leave this trip below, or leave the other one first."
+            : `${bookedName} confirmed another trip with the same plan, so this one can't be confirmed unless they leave that trip. You can keep chatting or leave.`}
+        </Notice>
+      )}
       {p.status === "declined" && (
         <Notice tone="warning" title="This match ended." action={<Link href="/matches" className="font-medium text-accent-text underline-offset-4 hover:underline">Look for a new match</Link>}>
           The group couldn&apos;t agree on a plan, or everyone left. No problem — your plans are still active.
@@ -93,7 +104,7 @@ export default async function TripRoom({ params, searchParams }: { params: Promi
         )}
       </Card>
 
-      {pending && isFinal && !me.accepted && (
+      {canSettle && isFinal && !me.accepted && (
         <Card className="flex flex-col gap-3">
           <h2 className="text-lg font-semibold">The final plan is in — do you accept?</h2>
           <p className="text-sm text-muted">{trip.summary}{trip.meta?.wantMore ? ` · Open to ${trip.meta.extraSpots} more ${trip.meta.extraSpots === 1 ? "person" : "people"} on Discover` : " · Just this group"}</p>
@@ -108,7 +119,7 @@ export default async function TripRoom({ params, searchParams }: { params: Promi
         </Card>
       )}
 
-      {pending && live && (
+      {canSettle && live && (
         <Card>
           <h2 className="mb-1 text-lg font-semibold">{isFinal ? "Change the final plan" : "Lock in the plan"}</h2>
           <p className="mb-4 text-sm text-muted">After you&apos;ve talked it through, one person fills this in for the group.</p>

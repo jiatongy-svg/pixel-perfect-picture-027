@@ -75,7 +75,7 @@ Matches need **40+**. Groups of 3–4 are built from people who each fit you, an
 2. One person fills in the **final plan** checklist: exact dates and place, whether to open it to more people (how many, and when sign-ups close — default 48 h before the trip). Sending it counts as their acceptance.
 3. Everyone else taps **Accept**. When everyone has accepted the same version, the trip is **confirmed**: contacts (email + optional phone/WeChat) are shared with members only, and there's an **Add to my calendar** (.ics) button.
 4. If the group wanted more people, the trip appears on **Discover → Open trips**. Classmates join the plan as it is, up to the cap and before the deadline. Strict group-size users can't see or join trips beyond their limit. Flexible members get a "the group grew — stay or leave?" notice.
-5. Once confirmed, everyone's plan for this trip is **booked**: it isn't matched again until they leave the trip.
+5. Once confirmed, everyone's plan for this trip is **booked**: it isn't matched again until they leave the trip. A plan can be in several trips that are still being worked out, but only one can be confirmed: the others show whose plan is already booked and refuse a final plan or accept.
 6. Anyone can **leave** at any time. If a 2-person match loses a member before it's confirmed, it ends.
 7. **No match after 24 h?** On a plan with no matches, you can end the search or tap **Still go** to post your own trip to Discover. You can also post a plan straight to Discover when you create it ("I'm going no matter what").
 
@@ -103,6 +103,7 @@ npm run rls-check  # security checks against the real Supabase project
 
 ## Changelog
 
+- **2026-10-22 (fixes 2)** One plan, one confirmed trip: if the same plan is in two pending trips and one confirms, the other can't be confirmed (the trip room says whose plan is booked). Database: `migrations/007_one_trip_per_plan.sql`.
 - **2026-10-22 (fixes)** A plan in a confirmed trip is now **booked**: it isn't matched again and isn't listed on Discover (no double-booking the same break); My plans shows a "Booked" badge, and leaving the trip frees the plan. The final-plan checklist now checks against the trip's own plans (older trips were compared with each member's newest plan). Calendar files escape semicolons correctly. Database: `migrations/006_booked_plans.sql`.
 - **2026-10-22 (late night)** Match / Discover redesign. Pairs and groups in one anonymous list; new score (dates 45, destination 20, group size 15, budget 10, style 10). Profile: driver's license, "can rent a car", travel vibe, preferred group size for weekends and long breaks (strict or flexible), and an optional contact. Plans: "I'm willing to drive", per-plan group size, "going no matter what" publishing. Proposals/counters are replaced by **My trips**: mutual Interested → group chat → final-plan checklist → everyone accepts → contacts + calendar export. Discover (formerly Explore) gains **Open trips** you can join or leave. No-match plans can end the search or post their own trip. Database: `migrations/005_trips_chat_groups.sql`.
 

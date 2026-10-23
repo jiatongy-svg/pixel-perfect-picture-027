@@ -58,7 +58,7 @@ You'll need about an hour, a laptop, and:
 1. In Supabase, open **SQL Editor** → **New query**.
 2. Open `supabase/schema.sql` from this project. Copy **all** of it, paste it into the editor, and click **Run**.
 
-Already set up before? Run only the newest files in `supabase/migrations/` that you haven't run yet, in order (`002` … `006`). Each one is safe to run twice.
+Already set up before? Run only the newest files in `supabase/migrations/` that you haven't run yet, in order (`002` … `007`). Each one is safe to run twice.
 
 **How to know it worked:** you see "Success. No rows returned". **Table Editor** lists `allowed_emails`, `profiles`, `travel_plans`, `match_passes`, `proposals`, `proposal_members`, `proposal_versions`, `proposal_approvals`, and `confirmed_itineraries`. Each one has a shield icon showing **RLS enabled**. **Storage** shows a private bucket called `avatars`.
 

@@ -167,3 +167,34 @@ describe("other paths", () => {
     await expect(as("ben", "insert into public.contacts (user_id, contact) values ($1, 'x')", [U.ana])).rejects.toThrow(/row-level security|duplicate/);
   });
 });
+
+describe("one plan, one confirmed trip", () => {
+  it("the same plan in two pending trips: once one confirms, the other can't; leaving frees it", async () => {
+    const newPlan = async (w: Who) => (await as<{ id: string }>(w, `insert into public.travel_plans (user_id, timing_mode, break_id, date_mode, trip_length_min, trip_length_max, destinations, destination_flex, budget_min, budget_max)
+      values ($1, 'break', 'spring', 'anytime', 2, 4, '[]', 'open', 100, 900) returning id`, [U[w]]))[0].id;
+    const [e, a, b] = [await newPlan("eli"), await newPlan("ana"), await newPlan("ben")];
+    const k = (...ids: string[]) => ids.sort().join(",");
+    const open = async (x: Who, y: Who, planKey: string) => {
+      await as(x, "select * from public.express_interest($1)", [planKey]);
+      await as(y, "select * from public.express_interest($1)", [planKey]);
+      return (await as<{ proposal_id: string }>("service", "select * from public.start_trip($1, $2, 'long', '[]', '{}')", [U[x], planKey]))[0].proposal_id;
+    };
+    const t1 = await open("eli", "ana", k(e, a));
+    const t2 = await open("eli", "ben", k(e, b));
+    const final = (t: string, who: Who) => as("service", "select public.submit_final_plan($1, $2, 1, '[]', '{\"meta\":{\"final\":true}}', '')", [U[who], t]);
+
+    await final(t2, "ben"); // trip 2 gets a final plan first, but isn't accepted yet
+    await final(t1, "eli");
+    expect((await as<{ s: string }>("ana", "select public.accept_proposal($1, 2) as s", [t1]))[0].s).toBe("confirmed");
+
+    expect((await as<{ n: string }>("ben", "select public.booked_member($1) as n", [t2]))[0].n).toBe("eli");
+    expect((await as<{ n: string | null }>("cy", "select public.booked_member($1) as n", [t2]))[0].n).toBeNull(); // not a member
+    await expect(as("eli", "select public.accept_proposal($1, 2)", [t2])).rejects.toThrow(/ALREADY_BOOKED/);
+    await expect(as("service", "select public.submit_final_plan($1, $2, 2, '[]', '{}', '')", [U.ben, t2])).rejects.toThrow(/ALREADY_BOOKED/);
+
+    // Eli leaves trip 1 -> the plan is free again and trip 2 can be confirmed.
+    await as("eli", "select public.leave_trip($1)", [t1]);
+    expect((await as<{ n: string | null }>("ben", "select public.booked_member($1) as n", [t2]))[0].n).toBeNull();
+    expect((await as<{ s: string }>("eli", "select public.accept_proposal($1, 2) as s", [t2]))[0].s).toBe("confirmed");
+  });
+});
