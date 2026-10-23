@@ -6,11 +6,12 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { Camera, Car } from "lucide-react";
-import { saveProfile } from "@/app/actions";
-import { EQUIPMENT, EXPERIENCE, LODGING, PACE, SCHEDULE, type EquipmentId, type LodgingId } from "@/lib/catalog";
+import { saveContact, saveProfile } from "@/app/actions";
+import { EQUIPMENT, EXPERIENCE, LODGING, PACE, SCHEDULE, VIBES, type EquipmentId, type LodgingId, type VibeId } from "@/lib/catalog";
+import { GROUP_SIZES } from "@/lib/groupsize";
 import { PROFILE_LIMITS } from "@/lib/constants";
 import { createBrowserSupabase } from "@/lib/supabase/client";
-import { MBTI_TYPES, type Mbti, type Profile } from "@/lib/types";
+import { MBTI_TYPES, type GroupPref, type Mbti, type Profile } from "@/lib/types";
 import { Avatar, Button, Card, Chip, Field, Group, Notice, OptionCard, inputBase, inputClass } from "@/components/ui";
 
 type Draft = Omit<Profile, "id" | "completed">;
@@ -18,13 +19,15 @@ type Draft = Omit<Profile, "id" | "completed">;
 const EMPTY: Draft = {
   display_name: "", msba_year: "1st", photo_path: null, bio: "", travel_experience: "some", pace: "balanced",
   schedule: "flexible", lodging_prefs: [], has_car: false, car_seats: 0, equipment: [], mbti: null,
+  has_license: false, can_rent: false, vibes: [], group_pref_weekend: "any", group_strict_weekend: false, group_pref_long: "any", group_strict_long: false,
 };
 
 // `next`: where to go after saving (onboarding). Without it, saving returns to
 // the short profile summary.
-export function ProfileForm({ userId, initial, photoUrl, next }: { userId: string; initial: Profile | null; photoUrl: string | null; next?: string }) {
+export function ProfileForm({ userId, initial, photoUrl, next, contact = "" }: { userId: string; initial: Profile | null; photoUrl: string | null; next?: string; contact?: string }) {
   const router = useRouter();
   const [d, setD] = useState<Draft>(initial ? { ...EMPTY, ...initial } : EMPTY);
+  const [contactLine, setContactLine] = useState(contact);
   const [preview, setPreview] = useState<string | null>(photoUrl);
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -54,7 +57,11 @@ export function ProfileForm({ userId, initial, photoUrl, next }: { userId: strin
   function submit() {
     setResult(null);
     startTransition(async () => {
-      const r = await saveProfile({ ...d, car_seats: d.has_car ? d.car_seats : 0 });
+      const r = await saveProfile({ ...d, car_seats: d.has_car ? d.car_seats : 0, can_rent: d.has_license && d.can_rent });
+      if (r.ok && contactLine !== contact) {
+        const c = await saveContact(contactLine);
+        if (!c.ok) { setErrors({ contact: c.error }); setResult({ tone: "error", text: c.error }); return; }
+      }
       if (!r.ok) {
         setErrors(r.fields ?? {});
         setResult({ tone: "error", text: r.error });
@@ -128,6 +135,13 @@ export function ProfileForm({ userId, initial, photoUrl, next }: { userId: strin
               {MBTI_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </Field>
+          <Group legend="Your travel vibe" hint="Your usual style. Each plan can pick its own.">
+            <div className="flex flex-wrap gap-2">
+              {VIBES.map((v) => (
+                <Chip key={v.id} selected={d.vibes.includes(v.id)} title={`${v.description} e.g. ${v.examples}`} onClick={() => set("vibes", toggle<VibeId>(d.vibes, v.id))}>{v.label}</Chip>
+              ))}
+            </div>
+          </Group>
           <Group legend="Where you like to stay" hint="Pick any that you're happy with.">
             <div className="flex flex-wrap gap-2">
               {LODGING.map((x) => (
@@ -139,8 +153,8 @@ export function ProfileForm({ userId, initial, photoUrl, next }: { userId: strin
       </Card>
 
       <Card>
-        <h2 className="mb-1 text-lg font-semibold">What you own</h2>
-        <p className="mb-4 text-sm text-muted">Your personal gear. For each trip you'll choose what you're willing to bring.</p>
+        <h2 className="mb-1 text-lg font-semibold">Car, driving & gear</h2>
+        <p className="mb-4 text-sm text-muted">What you have. For each trip you&apos;ll choose what you&apos;re willing to bring, and whether you&apos;ll drive.</p>
         <div className="flex flex-col gap-5">
           <Group legend="Car" error={err("car_seats")}>
             <div className="flex flex-wrap items-center gap-3">
@@ -156,6 +170,12 @@ export function ProfileForm({ userId, initial, photoUrl, next }: { userId: strin
               )}
             </div>
           </Group>
+          <Group legend="Driving" hint="Self-reported. US rental companies usually need you to be 21+ (extra fees under 25). International licenses: check the rental company's rules." error={err("can_rent")}>
+            <div className="flex flex-wrap gap-2">
+              <Chip selected={d.has_license} onClick={() => setD((x) => ({ ...x, has_license: !x.has_license, can_rent: !x.has_license ? x.can_rent : false }))}>I have a driver&apos;s license</Chip>
+              <Chip selected={d.can_rent} disabled={!d.has_license} onClick={() => set("can_rent", !d.can_rent)}>I can rent a car</Chip>
+            </div>
+          </Group>
           <Group legend="Gear">
             <div className="flex flex-wrap gap-2">
               {EQUIPMENT.map((x) => (
@@ -164,6 +184,36 @@ export function ProfileForm({ userId, initial, photoUrl, next }: { userId: strin
             </div>
           </Group>
         </div>
+      </Card>
+
+      <Card>
+        <h2 className="mb-1 text-lg font-semibold">What group size do you prefer to travel in?</h2>
+        <p className="mb-4 text-sm text-muted">Separate for weekend trips and long breaks. A plan can override this. Flexible: it only affects your match score. Strict: you never see or join trips outside it.</p>
+        <div className="flex flex-col gap-5">
+          {([["weekend", "Weekend trips"], ["long", "Long breaks"]] as const).map(([kind, title]) => {
+            const prefKey = kind === "weekend" ? "group_pref_weekend" : "group_pref_long";
+            const strictKey = kind === "weekend" ? "group_strict_weekend" : "group_strict_long";
+            return (
+              <Group key={kind} legend={title}>
+                <div role="radiogroup" aria-label={`${title} group size`} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {GROUP_SIZES.map((g) => <OptionCard key={g.id} selected={d[prefKey] === g.id} title={g.label} description={g.description} onSelect={() => set(prefKey, g.id as GroupPref)} />)}
+                </div>
+                {d[prefKey] !== "any" && (
+                  <div role="radiogroup" aria-label={`${title}: how flexible`} className="mt-1 grid grid-cols-2 gap-2 sm:w-96">
+                    <OptionCard selected={!d[strictKey]} title="Flexible" description="Lowers the score" onSelect={() => set(strictKey, false)} />
+                    <OptionCard selected={d[strictKey]} title="Strict" description="Hard limit" onSelect={() => set(strictKey, true)} />
+                  </div>
+                )}
+              </Group>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card>
+        <Field id="contact" label="Contact for trip-mates" optional hint="Phone, WeChat or Instagram. Shared only with people on a confirmed trip with you (with your USC email)." error={err("contact")}>
+          <input id="contact" className={inputClass} maxLength={80} value={contactLine} placeholder="WeChat: tommy_trojan" onChange={(e) => setContactLine(e.target.value)} />
+        </Field>
       </Card>
 
       {result && <Notice tone={result.tone}>{result.text}</Notice>}

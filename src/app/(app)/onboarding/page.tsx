@@ -17,7 +17,7 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
   return (
     <div className="mx-auto max-w-3xl">
       <ol className="mb-6 flex gap-2 text-sm" aria-label="Setup steps">
-        {[["profile", "1. Travel profile"], ["plan", "2. Your plan"]].map(([id, label]) => (
+        {[["profile", "1. Travel profile"], ["plan", "2. Your trip"]].map(([id, label]) => (
           <li key={id} aria-current={step === id ? "step" : undefined}
             className={cx("rounded-full px-3 py-1 font-medium", step === id ? "bg-accent text-on-accent" : "bg-surface-sunken text-muted")}>{label}</li>
         ))}
@@ -29,8 +29,8 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
         </>
       ) : (
         <>
-          <PageHeader title="What's your next trip?" subtitle={
-            <>One plan at a time. Don't have a destination yet? Just pick when you're free. <Link href="/matches" className="font-medium text-accent-text underline-offset-4 hover:underline">Skip for now</Link></>
+          <PageHeader title="Do you have a trip in mind?" subtitle={
+            <>Add your plan to get matched with classmates. No plan? <Link href="/discover" className="font-medium text-accent-text underline-offset-4 hover:underline">Browse trips that are already happening on Discover</Link>.</>
           } />
           <PlanForm initial={null} profile={profile!} fridays={upcomingFridays(todayLA(), PLAN_LIMITS.weekendHorizonDays)} next="/matches" />
         </>

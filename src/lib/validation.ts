@@ -9,8 +9,9 @@
 // ============================================================================
 import { z } from "zod";
 import { BREAK_IDS, EQUIPMENT_IDS, VIBE_IDS, findBreak, findDestination } from "./catalog";
-import { PLAN_LIMITS, PROFILE_LIMITS } from "./constants";
+import { PLAN_LIMITS, PROFILE_LIMITS, TRIPS } from "./constants";
 import { daysInclusive, isFriday, isIsoDate, toDay, upcomingFridays } from "./dates";
+import { GROUP_PREF_IDS } from "./groupsize";
 import { MBTI_TYPES } from "./types";
 
 const isoDate = z.string().refine(isIsoDate, "Pick a valid date");
@@ -50,9 +51,17 @@ export const profileSchema = z
     car_seats: z.number().int().min(0).max(PROFILE_LIMITS.maxSeats, `At most ${PROFILE_LIMITS.maxSeats} passenger seats`),
     equipment: z.array(z.enum(EQUIPMENT_IDS)).max(EQUIPMENT_IDS.length).refine(unique, "Duplicate item"),
     mbti: z.enum(MBTI_TYPES).nullable(),
+    vibes: z.array(z.enum(VIBE_IDS)).max(VIBE_IDS.length).refine(unique, "Duplicate vibe"),
+    has_license: z.boolean(),
+    can_rent: z.boolean(),
+    group_pref_weekend: z.enum(GROUP_PREF_IDS),
+    group_strict_weekend: z.boolean(),
+    group_pref_long: z.enum(GROUP_PREF_IDS),
+    group_strict_long: z.boolean(),
   })
   .superRefine((p, ctx) => {
     if (p.has_car && p.car_seats < 1) ctx.addIssue({ code: "custom", path: ["car_seats"], message: "How many passengers can your car take?" });
+    if (p.can_rent && !p.has_license) ctx.addIssue({ code: "custom", path: ["can_rent"], message: "Renting a car needs a driver's license" });
   })
   .transform((p) => ({ ...p, car_seats: p.has_car ? p.car_seats : 0 }));
 export type ProfileInput = z.input<typeof profileSchema>;
@@ -85,6 +94,9 @@ export function planSchema(today: string) {
       bringing_car: z.boolean(),
       seats_offered: z.number().int().min(0).max(PROFILE_LIMITS.maxSeats),
       bringing_gear: z.array(z.enum(EQUIPMENT_IDS)).refine(unique, "Duplicate item"),
+      willing_to_drive: z.boolean().default(false),
+      group_pref: z.enum(GROUP_PREF_IDS).nullable().default(null), // null = use my profile default
+      group_strict: z.boolean().nullable().default(null),
       notes: z.string().trim().max(PLAN_LIMITS.maxNotes, `Keep notes under ${PLAN_LIMITS.maxNotes} characters`),
     })
     .superRefine((p, ctx) => {
@@ -155,6 +167,31 @@ export const counterSchema = z
     note: z.string().trim().max(300, "Keep it under 300 characters"),
   })
   .refine((c) => toDay(c.end) >= toDay(c.start), { path: ["end"], message: "End date is before the start date" });
+
+// ---------------------------------------------------------------------------
+// The group's final plan, filled in from the chat checklist.
+// ---------------------------------------------------------------------------
+export const finalPlanSchema = z
+  .object({
+    proposalId: z.string().uuid(),
+    version: z.number().int().min(1),
+    destinationId: z.string().regex(/^([a-z0-9-]{1,40}|geo:\d{1,12})$/, "Pick a destination"),
+    start: isoDate,
+    end: isoDate,
+    wantMore: z.boolean(), // open the trip to more people on Discover?
+    extraSpots: z.number().int().min(1).max(TRIPS.maxExtraSpots).default(1),
+    joinDeadline: isoDate.nullable(), // last day people can join (defaults to 2 days before)
+    note: z.string().trim().max(300, "Keep it under 300 characters").default(""),
+  })
+  .refine((c) => toDay(c.end) >= toDay(c.start), { path: ["end"], message: "End date is before the start date" })
+  .refine((c) => !c.wantMore || !c.joinDeadline || toDay(c.joinDeadline) <= toDay(c.start), { path: ["joinDeadline"], message: "Sign-ups must close before the trip starts" });
+
+// "I'm going no matter what": publish one of my plans to Discover right away.
+export const hostSchema = z.object({
+  planId: z.string().uuid(),
+  spots: z.number().int().min(1, "Offer at least 1 spot").max(TRIPS.maxExtraSpots),
+  joinDeadline: isoDate.nullable(),
+});
 
 // Turns zod errors into { field: "message" } for the form.
 export function fieldErrors(error: z.ZodError): Record<string, string> {

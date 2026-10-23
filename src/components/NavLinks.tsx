@@ -3,20 +3,20 @@
 // screens, and as a bottom tab bar on phones (thumb-friendly).
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarRange, Compass, Inbox, Sparkles, UserRound } from "lucide-react";
+import { CalendarRange, Compass, Luggage, Sparkles, UserRound } from "lucide-react";
 import { cx } from "@/components/ui";
 
 const LINKS = [
   { href: "/matches", label: "Matches", Icon: Sparkles },
-  { href: "/explore", label: "Explore", Icon: Compass },
-  { href: "/proposals", label: "Proposals", Icon: Inbox },
+  { href: "/discover", label: "Discover", Icon: Compass },
+  { href: "/trips", label: "My trips", Icon: Luggage },
   { href: "/plans", label: "My plans", Icon: CalendarRange },
   { href: "/profile", label: "Profile", Icon: UserRound },
 ];
 
 export function NavLinks({ pending, placement }: { pending: number; placement: "top" | "bottom" }) {
   const path = usePathname();
-  const active = (href: string) => path === href || path.startsWith(href + "/") || (href === "/proposals" && path.startsWith("/trips"));
+  const active = (href: string) => path === href || path.startsWith(href + "/") || (href === "/trips" && path.startsWith("/proposals"));
 
   if (placement === "top") {
     return (
@@ -33,7 +33,7 @@ export function NavLinks({ pending, placement }: { pending: number; placement: "
                 )}
               >
                 {label}
-                {href === "/proposals" && pending > 0 && <span className="rounded-full bg-highlight px-1.5 text-xs font-bold text-highlight-text">{pending}</span>}
+                {href === "/trips" && pending > 0 && <span className="rounded-full bg-highlight px-1.5 text-xs font-bold text-highlight-text">{pending}</span>}
               </Link>
             </li>
           ))}
@@ -57,7 +57,7 @@ export function NavLinks({ pending, placement }: { pending: number; placement: "
             >
               <Icon aria-hidden className="size-5" />
               {label}
-              {href === "/proposals" && pending > 0 && (
+              {href === "/trips" && pending > 0 && (
                 <span className="absolute top-2 left-[calc(50%+6px)] rounded-full bg-highlight px-1.5 text-[0.6875rem] font-bold text-highlight-text" aria-label={`${pending} pending`}>{pending}</span>
               )}
             </Link>

@@ -17,17 +17,19 @@ import { BREAKS, EQUIPMENT, VIBES, findBreak, type EquipmentId, type VibeId } fr
 import { NEARBY_KM } from "@/lib/constants";
 import { toPlaces } from "@/lib/places";
 import { DestinationPicker } from "@/components/DestinationPicker";
-import { PLAN_LIMITS } from "@/lib/constants";
+import { PLAN_LIMITS, TRIPS } from "@/lib/constants";
+import { GROUP_SIZES } from "@/lib/groupsize";
 import { addDays, formatRange } from "@/lib/dates";
 import type { DestinationFlex, Plan, Profile } from "@/lib/types";
 import { Button, Card, Chip, Field, Group, Notice, OptionCard, cx, inputBase, inputClass } from "@/components/ui";
 
-type Draft = Omit<Plan, "id" | "user_id" | "updated_at" | "notes"> & { notes: string };
+type Draft = Omit<Plan, "id" | "user_id" | "updated_at" | "notes" | "status" | "searching_since"> & { notes: string };
 
 const DEFAULT: Draft = {
   title: "", timing_mode: "break", break_id: null, date_mode: "anytime", preferred_start: null, preferred_end: null, flex_days: 2, weekends: [],
   trip_length_min: 3, trip_length_max: 4, destinations: [], destination_flex: "open_to_nearby", budget_min: 200, budget_max: 600,
   vibes: [], bringing_car: false, seats_offered: 0, bringing_gear: [], notes: "",
+  willing_to_drive: false, group_pref: null, group_strict: null,
 };
 
 const FLEX: { id: DestinationFlex; title: string; description: string }[] = [
@@ -38,7 +40,7 @@ const FLEX: { id: DestinationFlex; title: string; description: string }[] = [
 
 type Props = {
   initial: Plan | null;
-  profile: Pick<Profile, "has_car" | "car_seats" | "equipment">;
+  profile: Pick<Profile, "has_car" | "car_seats" | "equipment" | "has_license" | "can_rent" | "vibes" | "group_pref_weekend" | "group_pref_long">;
   fridays: string[]; // upcoming Fridays the student may pick
   next?: string; // where to go after saving (default: the My plans list)
 };
@@ -47,10 +49,14 @@ type Props = {
 export function PlanForm({ initial, profile, fridays, next }: Props) {
   const router = useRouter();
   const [d, setD] = useState<Draft>(() =>
-    initial ? { ...DEFAULT, ...initial, destinations: toPlaces(initial.destinations), notes: initial.notes ?? "", flex_days: initial.flex_days || 2 } : DEFAULT,
+    initial
+      ? { ...DEFAULT, ...initial, destinations: toPlaces(initial.destinations), notes: initial.notes ?? "", flex_days: initial.flex_days || 2 }
+      : { ...DEFAULT, vibes: profile.vibes ?? [] }, // new plans start with my usual vibes
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [result, setResult] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [result, setResult] = useState<{ tone: "success" | "error"; text: string; conflicts?: string[] } | null>(null);
+  // "I'm going no matter what": publish to Discover when saving (new plans only).
+  const [publish, setPublish] = useState<{ on: boolean; spots: number; deadline: string }>({ on: false, spots: 2, deadline: "" });
   const [pending, startTransition] = useTransition();
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((x) => ({ ...x, [k]: v }));
@@ -69,10 +75,11 @@ export function PlanForm({ initial, profile, fridays, next }: Props) {
       const r = await savePlan(
         { ...d, trip_length_min: Math.min(d.trip_length_min, maxLen), trip_length_max: Math.min(d.trip_length_max, maxLen) },
         initial?.id,
+        publish.on ? { spots: publish.spots, joinDeadline: publish.deadline || null } : undefined,
       );
-      if (!r.ok) {
+      if (r && !r.ok) {
         setErrors(r.fields ?? {});
-        setResult({ tone: "error", text: r.error });
+        setResult({ tone: "error", text: r.error, conflicts: r.conflicts });
         // Move keyboard/screen-reader users to the first problem.
         const first = Object.keys(r.fields ?? {})[0];
         if (first) document.getElementById(first)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -247,8 +254,15 @@ export function PlanForm({ initial, profile, fridays, next }: Props) {
       <Card>
         <h2 className="mb-1 text-lg font-semibold">For this trip, I can bring</h2>
         <p className="mb-4 text-sm text-muted">From your profile. <Link href="/profile" className="font-medium text-accent-text underline-offset-4 hover:underline">Update what you own</Link></p>
+        {profile.has_license && (
+          <div className="mb-4">
+            <Chip selected={d.willing_to_drive} onClick={() => set("willing_to_drive", !d.willing_to_drive)}>
+              {profile.can_rent ? "I can drive or rent a car on this trip" : "I can share the driving on this trip"}
+            </Chip>
+          </div>
+        )}
         {!profile.has_car && profile.equipment.length === 0 ? (
-          <p className="text-sm text-muted">Nothing listed on your profile yet. That's completely fine.</p>
+          <p className="text-sm text-muted">Nothing listed on your profile yet. That&apos;s completely fine.</p>
         ) : (
           <div className="flex flex-col gap-4">
             {profile.has_car && (
@@ -278,7 +292,43 @@ export function PlanForm({ initial, profile, fridays, next }: Props) {
         )}
       </Card>
 
-      {/* 6. NOTES ----------------------------------------------------------- */}
+      {/* 6. GROUP SIZE ------------------------------------------------------ */}
+      <Card>
+        <h2 className="mb-1 text-lg font-semibold">Group size for this trip</h2>
+        <p className="mb-4 text-sm text-muted">Your profile default is {GROUP_SIZES.find((g) => g.id === (d.timing_mode === "weekends" ? profile.group_pref_weekend : profile.group_pref_long))?.label.toLowerCase()} for {d.timing_mode === "weekends" ? "weekend trips" : "long breaks"}.</p>
+        <div role="radiogroup" aria-label="Group size for this trip" className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          <OptionCard selected={d.group_pref === null} title="My default" description="From my profile" onSelect={() => setD((x) => ({ ...x, group_pref: null, group_strict: null }))} />
+          {GROUP_SIZES.map((g) => <OptionCard key={g.id} selected={d.group_pref === g.id} title={g.label} description={g.description} onSelect={() => setD((x) => ({ ...x, group_pref: g.id, group_strict: x.group_strict ?? false }))} />)}
+        </div>
+        {d.group_pref !== null && d.group_pref !== "any" && (
+          <div role="radiogroup" aria-label="How flexible" className="mt-3 grid grid-cols-2 gap-2 sm:w-96">
+            <OptionCard selected={!d.group_strict} title="Flexible" description="Lowers the score" onSelect={() => set("group_strict", false)} />
+            <OptionCard selected={!!d.group_strict} title="Strict" description="Hard limit" onSelect={() => set("group_strict", true)} />
+          </div>
+        )}
+      </Card>
+
+      {/* 7. GO NO MATTER WHAT (new plans) ------------------------------------ */}
+      {!initial && (
+        <Card>
+          <Chip selected={publish.on} onClick={() => setPublish((x) => ({ ...x, on: !x.on }))}>
+            {publish.on && <Check aria-hidden className="size-3.5" />} I&apos;m going no matter what — post it to Discover now
+          </Chip>
+          <p className="mt-2 text-sm text-muted">Skip matching: classmates can join your plan as it is until sign-ups close. Needs at least one destination.</p>
+          {publish.on && (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field id="publish-spots" label="Open spots" hint="How many people can join you?">
+                <input id="publish-spots" type="number" min={1} max={TRIPS.maxExtraSpots} className={`${inputBase} w-28`} value={publish.spots} onChange={(e) => setPublish((x) => ({ ...x, spots: Number(e.target.value) || 1 }))} />
+              </Field>
+              <Field id="publish-deadline" label="Sign-ups close" optional hint="Default: 2 days before the trip">
+                <input id="publish-deadline" type="date" className={inputClass} value={publish.deadline} onChange={(e) => setPublish((x) => ({ ...x, deadline: e.target.value }))} />
+              </Field>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* 8. NOTES ----------------------------------------------------------- */}
       <Card>
         <Field id="notes" label="Private notes" optional hint="Only you can see these." error={err("notes")}>
           <textarea id="notes" rows={3} maxLength={PLAN_LIMITS.maxNotes} className={`${inputClass} h-auto py-2`} value={d.notes} onChange={(e) => set("notes", e.target.value)}
@@ -286,9 +336,9 @@ export function PlanForm({ initial, profile, fridays, next }: Props) {
         </Field>
       </Card>
 
-      {result && <Notice tone={result.tone}>{result.text}</Notice>}
+      {result && <Notice tone={result.tone} title={result.text}>{result.conflicts && <ul className="list-disc pl-4">{result.conflicts.map((c) => <li key={c}>{c}</li>)}</ul>}</Notice>}
       <div className="flex justify-end">
-        <Button type="submit" loading={pending} className="w-full sm:w-auto">{next ? "Save plan and see matches" : initial ? "Save changes" : "Save plan"}</Button>
+        <Button type="submit" loading={pending} className="w-full sm:w-auto">{publish.on ? "Save and post to Discover" : next ? "Save plan and see matches" : initial ? "Save changes" : "Save plan"}</Button>
       </div>
     </form>
   );

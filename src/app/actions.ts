@@ -15,27 +15,32 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { tryAiMerge } from "@/lib/ai-merge";
-import { PLAN_LIMITS } from "@/lib/constants";
+import { PLAN_LIMITS, TRIPS } from "@/lib/constants";
 import { todayLA } from "@/lib/dates";
 import { getViewer, loadPeople, loadProposals, proposalPeople } from "@/lib/data";
-import { scoreGroup, scorePair } from "@/lib/matching";
+import { tripKind } from "@/lib/matching";
 import { mergePlans, type MergedTrip } from "@/lib/merge";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Person } from "@/lib/types";
-import { counterSchema, fieldErrors, planSchema, profileSchema, type PlanInput, type ProfileInput } from "@/lib/validation";
+import { fieldErrors, finalPlanSchema, hostSchema, planSchema, profileSchema, type PlanInput, type ProfileInput } from "@/lib/validation";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string; fields?: Record<string, string>; conflicts?: string[] };
 
-const STALE = "This proposal changed. Refresh to see the latest version.";
+const STALE = "This trip changed. Refresh to see the latest version.";
 
 // Turn database error codes (raised in schema.sql) into sentences.
 function friendlyDbError(message: string | undefined): string {
   if (!message) return "Something went wrong. Please try again.";
   if (message.includes("STALE_VERSION")) return STALE;
-  if (message.includes("NOT_PENDING")) return "This proposal is already closed. Refresh to see its latest status.";
-  if (message.includes("NOT_MEMBER")) return "You're not part of this proposal.";
-  if (message.includes("NOT_ALLOWED")) return "Everyone on a proposal needs a finished profile and a saved plan.";
+  if (message.includes("NOT_PENDING")) return "This trip is already settled. Refresh to see its latest status.";
+  if (message.includes("NOT_MEMBER")) return "You're not part of this trip.";
+  if (message.includes("GROUP_SIZE_STRICT")) return "Joining would make this group bigger than your strict group-size limit. You can change it on your profile.";
+  if (message.includes("FULL")) return "This trip just filled up.";
+  if (message.includes("NOT_OPEN")) return "Sign-ups for this trip are closed.";
+  if (message.includes("not everyone is interested")) return "Not everyone is interested yet.";
+  if (message.includes("BAD_INPUT")) return "That trip is no longer available. Refresh and try again.";
+  if (message.includes("NOT_ALLOWED")) return "Everyone needs a finished profile first.";
   if (message.includes("check constraint")) return "Some answers aren't valid. Please review the form.";
   if (message.includes("TOO_MANY_PLANS")) return "You can save up to 5 plans. Delete one to add another.";
   return "Something went wrong. Please try again.";
@@ -156,7 +161,8 @@ export async function saveProfile(input: ProfileInput): Promise<ActionResult> {
 }
 
 // Create a new plan (no planId) or update one of my plans (planId).
-export async function savePlan(input: PlanInput, planId?: string): Promise<ActionResult> {
+// `publish`: also post it to Discover now with this many open spots.
+export async function savePlan(input: PlanInput, planId?: string, publish?: { spots: number; joinDeadline: string | null }): Promise<ActionResult> {
   const { supabase, userId, profile, plans } = await getViewer();
   if (planId && !plans.some((p) => p.id === planId)) return { ok: false, error: "That plan isn't yours or was deleted." };
   if (!planId && plans.length >= PLAN_LIMITS.maxPlans) return { ok: false, error: `You can save up to ${PLAN_LIMITS.maxPlans} plans. Delete one to add another.` };
@@ -170,13 +176,18 @@ export async function savePlan(input: PlanInput, planId?: string): Promise<Actio
   if (plan.seats_offered > profile.car_seats) return { ok: false, error: "Please fix the highlighted fields.", fields: { seats_offered: `Your profile says ${profile.car_seats} passenger seats` } };
   if (plan.bringing_gear.some((g) => !profile.equipment.includes(g)))
     return { ok: false, error: "Please fix the highlighted fields.", fields: { bringing_gear: "Only gear from your profile" } };
+  if (plan.willing_to_drive && !profile.has_license)
+    return { ok: false, error: "Add your driver's license to your profile first.", fields: { willing_to_drive: "No license on your profile" } };
 
   // RLS makes sure an update can only touch my own rows.
-  const { error } = planId
-    ? await supabase.from("travel_plans").update(plan).eq("id", planId).eq("user_id", userId)
-    : await supabase.from("travel_plans").insert({ user_id: userId, ...plan });
+  // Editing a plan restarts its 24-hour match window.
+  const { data: saved, error } = planId
+    ? await supabase.from("travel_plans").update({ ...plan, status: "active", searching_since: new Date().toISOString() }).eq("id", planId).eq("user_id", userId).select("id").single()
+    : await supabase.from("travel_plans").insert({ user_id: userId, ...plan }).select("id").single();
   if (error) return { ok: false, error: friendlyDbError(error.message) };
   revalidatePath("/", "layout");
+  // "I'm going no matter what": publish it to Discover right away.
+  if (publish) return hostTrip({ planId: saved.id as string, spots: publish.spots, joinDeadline: publish.joinDeadline });
   return { ok: true, message: "Plan saved" };
 }
 
@@ -194,7 +205,7 @@ export async function deletePlan(planId: string): Promise<ActionResult> {
 // ---------------------------------------------------------------------------
 export async function passMatch(targetKey: string): Promise<ActionResult> {
   const { supabase, userId } = await getViewer();
-  if (!/^[0-9a-f-]{36}(,[0-9a-f-]{36}){0,3}$/.test(targetKey)) return { ok: false, error: "Invalid match." };
+  if (!/^[0-9a-f-]{36}(,[0-9a-f-]{36}){0,5}$/.test(targetKey)) return { ok: false, error: "Invalid match." };
   const { error } = await supabase.from("match_passes").upsert({ user_id: userId, target_key: targetKey }, { ignoreDuplicates: true });
   if (error) return { ok: false, error: friendlyDbError(error.message) };
   revalidatePath("/matches");
@@ -210,106 +221,220 @@ export async function clearPasses(): Promise<ActionResult> {
 }
 
 // ---------------------------------------------------------------------------
-// Proposals
+// Trips: interest -> group chat -> final plan -> confirmed (-> Discover)
 // ---------------------------------------------------------------------------
 const snapshotsOf = (people: Person[]) => people.map((p) => ({ user_id: p.id, name: p.name, plan: p.plan }));
+const planKeyRe = /^[0-9a-f-]{36}(,[0-9a-f-]{36}){1,5}$/;
 
 // Build the merged trip (rules, optionally polished by AI) — or explain why not.
 async function buildTrip(people: Person[], overrides?: Parameters<typeof mergePlans>[2]): Promise<{ trip: MergedTrip } | { conflicts: string[] }> {
   const today = todayLA();
   const rules = mergePlans(people, today, overrides);
   if (!rules.feasible) return { conflicts: rules.conflicts };
-  if (overrides) return { trip: rules }; // a counter keeps exactly what the person asked for
+  if (overrides) return { trip: rules }; // the group's own choices are kept exactly
   return { trip: await tryAiMerge(people, rules, today) };
 }
 
-// Propose a trip between one of MY plans and 1–3 classmates' plans.
-export async function proposeTrip(myPlanId: string, otherPlanIds: string[]): Promise<ActionResult> {
+// Tap "Interested" on a potential trip (a set of plans incl. one of mine).
+// When everyone in it has tapped, the group chat opens with a suggested itinerary.
+export async function expressInterest(planKey: string): Promise<ActionResult> {
   const { supabase, userId } = await getViewer();
-  const mineOk = z.string().uuid().safeParse(myPlanId).success;
-  const ids = z.array(z.string().uuid()).min(1).max(3).safeParse(otherPlanIds);
-  if (!mineOk || !ids.success || ids.data.includes(myPlanId)) return { ok: false, error: "Invalid proposal." };
+  if (!planKeyRe.test(planKey)) return { ok: false, error: "Invalid match." };
+  const { data, error } = await supabase.rpc("express_interest", { p_plan_key: planKey });
+  if (error) return { ok: false, error: friendlyDbError(error.message) };
+  const r = (data as { mutual: boolean; interested: number; needed: number }[])[0];
+  revalidatePath("/matches");
+  if (!r.mutual) return { ok: true, message: `You're interested (${r.interested} of ${r.needed}). The group chat opens when everyone is.` };
 
-  // Load the CURRENT plans (as this user — RLS applies).
-  const loaded = await loadPeople(supabase, { planIds: [myPlanId, ...ids.data] });
-  const me = loaded.find((p) => p.plan.id === myPlanId && p.id === userId);
-  const others = ids.data.map((id) => loaded.find((p) => p.plan.id === id));
-  if (!me) return { ok: false, error: "Pick one of your own plans." };
-  if (others.some((o) => !o)) return { ok: false, error: "A classmate's plan changed or was removed. Refresh and try again." };
-  const people = [me, ...(others as Person[])];
-  if (new Set(people.map((p) => p.id)).size !== people.length) return { ok: false, error: "Each person can join with only one plan." };
-
-  // Re-check eligibility on the server with the latest data.
-  const today = todayLA();
-  const eligible = people.length === 2 ? scorePair(me, people[1], today).eligible : scoreGroup(people, today).eligible;
-  if (!eligible) {
-    const why = mergePlans(people, today);
-    return { ok: false, error: "These plans no longer line up.", conflicts: why.feasible ? ["Plans changed since matching. Refresh your matches."] : why.conflicts };
-  }
-
-  const built = await buildTrip(people);
-  if ("conflicts" in built) return { ok: false, error: "No feasible compromise.", conflicts: built.conflicts };
-
-  const admin = createAdminClient();
-  const { data, error } = await admin.rpc("create_proposal", {
+  // Everyone's in: suggest an itinerary from their CURRENT plans and open the chat.
+  const people = await loadPeople(supabase, { planIds: planKey.split(",") });
+  const me = people.find((p) => p.id === userId);
+  if (!me || people.length !== planKey.split(",").length) return { ok: false, error: "A plan changed or was removed. Refresh your matches." };
+  const ordered = [me, ...people.filter((p) => p !== me)];
+  const built = await buildTrip(ordered);
+  const suggestion = "trip" in built ? built.trip : null;
+  const kind = tripKind(suggestion?.dates ?? null, ordered.map((p) => p.plan));
+  const { data: started, error: e2 } = await createAdminClient().rpc("start_trip", {
     p_actor: userId,
-    p_plans: people.map((p) => p.plan.id),
+    p_plan_key: planKey,
+    p_kind: kind,
+    p_snapshots: snapshotsOf(ordered),
+    p_merged: suggestion ?? { summary: "No automatic suggestion — work out the dates and place in the chat." },
+  });
+  if (e2) return { ok: false, error: friendlyDbError(e2.message) };
+  revalidatePath("/", "layout");
+  redirect(`/trips/${(started as { proposal_id: string }[])[0].proposal_id}?new=1`);
+}
+
+export async function withdrawInterest(planKey: string): Promise<ActionResult> {
+  const { supabase, userId } = await getViewer();
+  if (!planKeyRe.test(planKey)) return { ok: false, error: "Invalid match." };
+  await supabase.from("match_interests").delete().eq("user_id", userId).eq("plan_key", planKey);
+  revalidatePath("/matches");
+  return { ok: true };
+}
+
+// ---- Chat ------------------------------------------------------------------
+export type ChatMessage = { id: number; userId: string; name: string; body: string; at: string; mine: boolean };
+
+export async function getMessages(proposalId: string, afterId = 0): Promise<ChatMessage[]> {
+  const { supabase, userId } = await getViewer();
+  if (!z.string().uuid().safeParse(proposalId).success) return [];
+  // RLS returns messages only to members of this trip.
+  const { data } = await supabase
+    .from("trip_messages")
+    .select("id, user_id, body, created_at")
+    .eq("proposal_id", proposalId)
+    .gt("id", afterId)
+    .order("id", { ascending: true })
+    .limit(200);
+  const rows = data ?? [];
+  const ids = [...new Set(rows.map((r) => r.user_id as string))];
+  const { data: profiles } = ids.length ? await supabase.from("profiles").select("id, display_name").in("id", ids) : { data: [] };
+  const nameBy = new Map((profiles ?? []).map((p) => [p.id as string, p.display_name as string]));
+  return rows.map((r) => ({ id: r.id as number, userId: r.user_id as string, name: nameBy.get(r.user_id) ?? "Classmate", body: r.body as string, at: r.created_at as string, mine: r.user_id === userId }));
+}
+
+export async function sendMessage(proposalId: string, body: string): Promise<ActionResult> {
+  const { supabase, userId } = await getViewer();
+  const text = body.trim();
+  if (!z.string().uuid().safeParse(proposalId).success || !text) return { ok: false, error: "Type a message first." };
+  if (text.length > TRIPS.maxMessage) return { ok: false, error: `Keep messages under ${TRIPS.maxMessage} characters.` };
+  const { error } = await supabase.from("trip_messages").insert({ proposal_id: proposalId, user_id: userId, body: text });
+  if (error) return { ok: false, error: "Couldn't send. You may no longer be in this trip." };
+  return { ok: true };
+}
+
+// ---- Final plan (the checklist survey) --------------------------------------
+export async function submitFinalPlan(input: z.input<typeof finalPlanSchema>): Promise<ActionResult> {
+  const { supabase, userId } = await getViewer();
+  const parsed = finalPlanSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Please fix the highlighted fields.", fields: fieldErrors(parsed.error) };
+  const f = parsed.data;
+
+  const [proposal] = await loadProposals(supabase, f.proposalId); // members only (RLS)
+  if (!proposal) return { ok: false, error: "You're not part of this trip." };
+  if (proposal.status !== "pending") return { ok: false, error: "This trip is already settled." };
+  if (proposal.current_version !== f.version) return { ok: false, error: STALE };
+
+  // The final dates and place must still fit everyone's plans (fixed dates stay fixed).
+  const people = await proposalPeople(supabase, proposal);
+  if (!people) return { ok: false, error: "A member deleted their plan. Start a new match instead." };
+  const built = await buildTrip(people, { destinationId: f.destinationId, start: f.start, end: f.end });
+  if ("conflicts" in built) return { ok: false, error: "That plan breaks someone's constraints.", conflicts: built.conflicts };
+
+  // Sign-ups close at the chosen date, or 48 hours before the trip by default.
+  const deadline = f.wantMore ? deadlineIso(f.joinDeadline, f.start) : null;
+  const merged = { ...built.trip, meta: { final: true, wantMore: f.wantMore, extraSpots: f.wantMore ? f.extraSpots : 0, joinDeadline: deadline } };
+  const { error } = await createAdminClient().rpc("submit_final_plan", {
+    p_actor: userId,
+    p_proposal: f.proposalId,
+    p_expected_version: f.version,
     p_snapshots: snapshotsOf(people),
-    p_merged: built.trip,
+    p_merged: merged,
+    p_note: f.note,
   });
   if (error) return { ok: false, error: friendlyDbError(error.message) };
-  const row = (data as { proposal_id: string; created: boolean }[])[0];
   revalidatePath("/", "layout");
-  redirect(`/proposals/${row.proposal_id}${row.created ? "" : "?existing=1"}`);
+  return { ok: true, message: "Final plan sent. It's set once everyone accepts it." };
+}
+
+// End of the chosen day in LA, or 48h before the trip starts.
+function deadlineIso(day: string | null, tripStart: string): string {
+  if (day) return new Date(`${day}T23:59:00-08:00`).toISOString();
+  const start = new Date(`${tripStart}T08:00:00-08:00`).getTime();
+  return new Date(start - TRIPS.defaultDeadlineHoursBefore * 3600_000).toISOString();
 }
 
 export async function acceptProposal(proposalId: string, version: number): Promise<ActionResult> {
   const { supabase } = await getViewer();
-  if (!z.string().uuid().safeParse(proposalId).success) return { ok: false, error: "Invalid proposal." };
+  if (!z.string().uuid().safeParse(proposalId).success) return { ok: false, error: "Invalid trip." };
   const { data, error } = await supabase.rpc("accept_proposal", { p_proposal: proposalId, p_version: version });
   if (error) return { ok: false, error: friendlyDbError(error.message) };
   revalidatePath("/", "layout");
   return { ok: true, message: data === "confirmed" ? "Confirmed — everyone's in!" : "Accepted. Waiting on the others." };
 }
 
-export async function declineProposal(proposalId: string, version: number): Promise<ActionResult> {
+// ---- Join / leave / stay -------------------------------------------------
+export async function joinTrip(proposalId: string): Promise<ActionResult> {
   const { supabase } = await getViewer();
-  if (!z.string().uuid().safeParse(proposalId).success) return { ok: false, error: "Invalid proposal." };
-  const { error } = await supabase.rpc("decline_proposal", { p_proposal: proposalId, p_version: version });
+  if (!z.string().uuid().safeParse(proposalId).success) return { ok: false, error: "Invalid trip." };
+  const { error } = await supabase.rpc("join_trip", { p_proposal: proposalId });
   if (error) return { ok: false, error: friendlyDbError(error.message) };
   revalidatePath("/", "layout");
-  return { ok: true, message: "Declined." };
+  redirect(`/trips/${proposalId}?joined=1`);
 }
 
-export async function counterProposal(input: z.input<typeof counterSchema>): Promise<ActionResult> {
+// One tap (after a confirm step in the UI). Frees the spot. For a match still
+// being worked out, leaving ends it ("match failed").
+export async function leaveTrip(proposalId: string): Promise<ActionResult> {
+  const { supabase } = await getViewer();
+  if (!z.string().uuid().safeParse(proposalId).success) return { ok: false, error: "Invalid trip." };
+  const { data, error } = await supabase.rpc("leave_trip", { p_proposal: proposalId });
+  if (error) return { ok: false, error: friendlyDbError(error.message) };
+  revalidatePath("/", "layout");
+  redirect(`/trips?left=${data === "declined" ? "ended" : "1"}`);
+}
+
+export async function stayInTrip(proposalId: string): Promise<ActionResult> {
+  const { supabase } = await getViewer();
+  if (!z.string().uuid().safeParse(proposalId).success) return { ok: false, error: "Invalid trip." };
+  await supabase.rpc("ack_group_size", { p_proposal: proposalId });
+  revalidatePath("/", "layout");
+  return { ok: true, message: "Got it — you're staying." };
+}
+
+// ---- Publish straight to Discover ("going no matter what" / "Still go") ----
+export async function hostTrip(input: z.input<typeof hostSchema>): Promise<ActionResult> {
   const { supabase, userId } = await getViewer();
-  const parsed = counterSchema.safeParse(input);
+  const parsed = hostSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Please fix the highlighted fields.", fields: fieldErrors(parsed.error) };
-  const c = parsed.data;
-
-  // RLS only returns this proposal if the user is a member.
-  const [proposal] = await loadProposals(supabase, c.proposalId);
-  if (!proposal) return { ok: false, error: "You're not part of this proposal." };
-  if (proposal.status !== "pending") return { ok: false, error: "This proposal is already closed." };
-  if (proposal.current_version !== c.version) return { ok: false, error: STALE };
-
-  // Use the latest version of the plans in this proposal; fixed constraints must still hold.
-  const people = await proposalPeople(supabase, proposal);
-  if (!people) return { ok: false, error: "A member deleted their plan, so this can't be countered. Decline it instead." };
-
-  const built = await buildTrip(people, { destinationId: c.destinationId, start: c.start, end: c.end });
-  if ("conflicts" in built) return { ok: false, error: "That change breaks someone's constraints.", conflicts: built.conflicts };
-
-  const admin = createAdminClient();
-  const { error } = await admin.rpc("counter_proposal", {
+  const h = parsed.data;
+  const [me] = await loadPeople(supabase, { planIds: [h.planId] });
+  if (!me || me.id !== userId) return { ok: false, error: "Pick one of your own plans." };
+  if (!me.plan.destinations.length) return { ok: false, error: "Add a destination to this plan first — people join a specific trip.", fields: { destinations: "Add a destination" } };
+  const built = await buildTrip([me]);
+  if ("conflicts" in built) return { ok: false, error: "This plan's dates have passed or don't work.", conflicts: built.conflicts };
+  const { data, error } = await createAdminClient().rpc("host_trip", {
     p_actor: userId,
-    p_proposal: c.proposalId,
-    p_expected_version: c.version,
-    p_snapshots: snapshotsOf(people),
-    p_merged: built.trip,
-    p_note: c.note,
+    p_plan: h.planId,
+    p_kind: tripKind(built.trip.dates, [me.plan]),
+    p_snapshots: snapshotsOf([me]),
+    p_merged: { ...built.trip, meta: { final: true, wantMore: true, extraSpots: h.spots, joinDeadline: deadlineIso(h.joinDeadline, built.trip.dates.start) } },
+    p_capacity: Math.min(TRIPS.maxTripSize, 1 + h.spots),
+    p_deadline: deadlineIso(h.joinDeadline, built.trip.dates.start),
   });
   if (error) return { ok: false, error: friendlyDbError(error.message) };
   revalidatePath("/", "layout");
-  return { ok: true, message: `Sent version ${c.version + 1}. Accept it when you're happy with it.` };
+  redirect(`/trips/${data as string}?published=1`);
+}
+
+// ---- The 24-hour "no match yet" window ------------------------------------
+// End: close the request (the plan stops being matched; it can be reopened).
+export async function endPlanSearch(planId: string): Promise<ActionResult> {
+  const { supabase, userId } = await getViewer();
+  if (!z.string().uuid().safeParse(planId).success) return { ok: false, error: "Invalid plan." };
+  await supabase.from("travel_plans").update({ status: "ended" }).eq("id", planId).eq("user_id", userId);
+  revalidatePath("/", "layout");
+  return { ok: true, message: "Closed. Want to propose a new plan?" };
+}
+
+// Keep looking for another 24 hours (also reopens an ended plan).
+export async function restartPlanSearch(planId: string): Promise<ActionResult> {
+  const { supabase, userId } = await getViewer();
+  if (!z.string().uuid().safeParse(planId).success) return { ok: false, error: "Invalid plan." };
+  await supabase.from("travel_plans").update({ status: "active", searching_since: new Date().toISOString() }).eq("id", planId).eq("user_id", userId);
+  revalidatePath("/", "layout");
+  return { ok: true, message: "We'll keep looking for another 24 hours." };
+}
+
+// ---- Contact line shown to confirmed trip-mates ---------------------------
+export async function saveContact(contact: string): Promise<ActionResult> {
+  const { supabase, userId } = await getViewer();
+  const text = contact.trim();
+  if (text.length > 80) return { ok: false, error: "Keep it under 80 characters." };
+  const { error } = await supabase.from("contacts").upsert({ user_id: userId, contact: text });
+  if (error) return { ok: false, error: friendlyDbError(error.message) };
+  revalidatePath("/profile");
+  return { ok: true, message: "Contact saved" };
 }

@@ -1,123 +1,101 @@
 "use client";
 // ============================================================================
-// One match card (a classmate, or a group). Shows the score, the reasons
-// (always built from real plan data), a plan snapshot, and Propose / Pass.
-// Proposing counts as YOUR acceptance of version 1 — the button says so.
+// One potential trip on the Match page — two people or a group, in one list.
+// Anonymous until everyone taps "Interested"; then a group chat opens and
+// names are shared. Shows the score, why it fits, and what someone would need
+// to adjust ("you'd need to shift your dates a bit").
 // ============================================================================
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { Car, MapPin, CalendarDays, Wallet, ArrowRight } from "lucide-react";
-import { passMatch, proposeTrip } from "@/app/actions";
-import { budgetText, styleText, whenText, whereText } from "@/lib/describe";
-import type { Place } from "@/lib/places";
-import type { Mbti, Person } from "@/lib/types";
+import { ArrowRight, CalendarDays, Check, Info, MapPin, Users, Wallet } from "lucide-react";
+import { expressInterest, passMatch, withdrawInterest } from "@/app/actions";
+import { PACE, vibeLabel } from "@/lib/catalog";
+import { formatRange } from "@/lib/dates";
+import { budgetText } from "@/lib/describe";
+import { placeLabel, type Place } from "@/lib/places";
+import type { DateRange, PublicPlan } from "@/lib/types";
 import { DestinationImage } from "@/components/DestinationImage";
-import { Avatar, Badge, Button, Card, Notice } from "@/components/ui";
+import { Badge, Button, Card, Notice } from "@/components/ui";
 
-type Props = {
-  kind: "pair" | "group";
+export type MatchCardData = {
+  key: string; // sorted plan ids, including mine
   score: number;
   reasons: string[];
-  members: { person: Person; photo: string | null }[];
-  targetKey: string;
-  openProposalId: string | null;
-  today: string;
-  place: Place | null; // best shared destination, for the photo
-  myPlanId: string; // which of my plans this match is for
-  myPlanName: string | null; // shown when I have more than one plan
-  viewerMbti: Mbti | null;
+  hints: string[];
+  trip: DateRange | null;
+  place: Place | null;
+  size: number;
+  others: { plan: PublicPlan; pace: string }[]; // anonymous: plan + travel style only
+  myPlanName: string | null; // when I have more than one plan
+  interested: number; // how many have tapped Interested (incl. me)
+  iAmInterested: boolean;
+  openTripId: string | null; // a chat already exists for this set of plans
 };
 
-// Shared MBTI letters (0–4). Just for fun: it never affects the score.
-const sharedLetters = (a: string, b: string) => [...a].filter((ch, i) => ch === b[i]).length;
+export function MatchCard({ m }: { m: MatchCardData }) {
+  const [pending, start] = useTransition();
+  const [msg, setMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
-export function MatchCard({ kind, score, reasons, members, targetKey, openProposalId, today, place, viewerMbti, myPlanId, myPlanName }: Props) {
-  const [proposing, startPropose] = useTransition();
-  const [passing, startPass] = useTransition();
-  const [error, setError] = useState<{ text: string; conflicts?: string[] } | null>(null);
-  const busy = proposing || passing;
-  const title = members.map((m) => m.person.name).join(kind === "group" ? ", " : "");
-
-  function propose() {
-    setError(null);
-    startPropose(async () => {
-      const r = await proposeTrip(myPlanId, members.map((m) => m.person.plan.id));
-      // On success the server redirects to the new proposal.
-      if (r && !r.ok) setError({ text: r.error, conflicts: r.conflicts });
-    });
-  }
-  function pass() {
-    setError(null);
-    startPass(async () => {
-      const r = await passMatch(targetKey);
-      if (!r.ok) setError({ text: r.error });
+  function run(fn: () => Promise<{ ok: boolean; error?: string; message?: string } | undefined>) {
+    setMsg(null);
+    start(async () => {
+      const r = await fn();
+      if (r && !r.ok) setMsg({ tone: "error", text: r.error ?? "Something went wrong." });
+      else if (r?.message) setMsg({ tone: "success", text: r.message });
     });
   }
 
   return (
-    <Card as="article" className="flex h-full flex-col gap-4">
-      {place && <DestinationImage place={place} />}
-      {myPlanName && <p className="-mb-2 text-xs font-medium text-accent-text">For your plan: {myPlanName}</p>}
-      <header className="flex items-start gap-3">
-        {kind === "pair" ? (
-          <Avatar name={members[0].person.name} url={members[0].photo} />
-        ) : (
-          <div className="flex shrink-0 -space-x-3" aria-hidden>
-            {members.map((m) => <span key={m.person.id} className="rounded-full ring-2 ring-[var(--surface-raised)]"><Avatar name={m.person.name} url={m.photo} size={40} /></span>)}
-          </div>
-        )}
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-lg font-semibold text-accent-text" title={kind === "group" ? `You, ${title}` : title}>{kind === "group" ? `You, ${title}` : title}</h3>
-          <p className="text-sm text-muted">
-            {kind === "pair" ? `MSBA ${members[0].person.msbaYear} year · ${styleText(members[0].person)}` : `${members.length + 1} people · ${members.map((m) => `${m.person.msbaYear} yr`).join(", ")}`}
+    <Card as="article" className="flex h-full flex-col gap-3">
+      {m.place && <DestinationImage place={m.place} />}
+      {m.myPlanName && <p className="text-xs font-medium text-accent-text">For your plan: {m.myPlanName}</p>}
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="flex items-center gap-1.5 text-xs text-muted"><Users aria-hidden className="size-3.5" />
+            {m.size === 2 ? "You + 1 anonymous classmate" : `You + ${m.size - 1} anonymous classmates`}
           </p>
+          <h3 className="text-lg leading-snug font-semibold break-words">{m.place ? placeLabel(m.place) : "Somewhere you both like"}</h3>
         </div>
-        <Badge tone="highlight">{score}% match</Badge>
+        <Badge tone="highlight">{m.score}% match</Badge>
       </header>
 
-      <ul className="flex flex-col gap-1.5 text-sm">
-        {reasons.map((r) => (
-          <li key={r} className="flex gap-2"><span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-full bg-accent" />{r}</li>
+      <dl className="grid gap-1.5 text-sm">
+        {m.trip && <Row icon={<CalendarDays className="size-4" />} label="Suggested dates" value={formatRange(m.trip)} />}
+        {m.others.map((o, i) => (
+          <Row key={o.plan.id} icon={<MapPin className="size-4" />} label={`Classmate ${i + 1}`}
+            value={`${m.others.length > 1 ? `Classmate ${i + 1}: ` : ""}${PACE.find((p) => p.id === o.pace)?.label ?? "Balanced"} pace${o.plan.vibes.length ? ` · ${o.plan.vibes.map(vibeLabel).join(", ")}` : ""}`} />
         ))}
+        <Row icon={<Wallet className="size-4" />} label="Their budget" value={m.others.map((o) => budgetText(o.plan)).join(" · ")} />
+      </dl>
+
+      <ul className="flex flex-col gap-1 text-sm">
+        {m.reasons.slice(0, 3).map((r) => <li key={r} className="flex gap-2"><Check aria-hidden className="mt-0.5 size-4 shrink-0 text-success" />{r}</li>)}
+        {m.hints.map((h) => <li key={h} className="flex gap-2 text-warning-text"><Info aria-hidden className="mt-0.5 size-4 shrink-0" />{h}</li>)}
       </ul>
 
-      {kind === "pair" && (
-        <dl className="grid grid-cols-1 gap-x-4 gap-y-1.5 rounded-md bg-surface-sunken p-3 text-sm sm:grid-cols-2">
-          <Snap icon={<MapPin className="size-4" />} label="Where" value={whereText(members[0].person.plan)} />
-          <Snap icon={<CalendarDays className="size-4" />} label="When" value={whenText(members[0].person.plan, today)} />
-          <Snap icon={<Wallet className="size-4" />} label="Budget" value={budgetText(members[0].person.plan)} />
-          {members[0].person.plan.bringing_car && <Snap icon={<Car className="size-4" />} label="Car" value={`${members[0].person.plan.seats_offered} open seats`} />}
-        </dl>
-      )}
+      {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
 
-      {(() => {
-        const them = members.filter((m) => m.person.profile.mbti);
-        if (!them.length) return null;
-        return (
-          <p className="text-xs text-muted">
-            MBTI: {them.map((m) => `${kind === "group" ? `${m.person.name} ` : ""}${m.person.profile.mbti}${viewerMbti ? ` (${sharedLetters(viewerMbti, m.person.profile.mbti!)}/4 letters like you)` : ""}`).join(" · ")}
-          </p>
-        );
-      })()}
-
-      {error && (
-        <Notice tone="error" title={error.text}>
-          {error.conflicts && <ul className="list-disc pl-4">{error.conflicts.map((c) => <li key={c}>{c}</li>)}</ul>}
-        </Notice>
-      )}
-
-      <footer className="mt-auto flex flex-col gap-2">
-        {openProposalId ? (
-          <Link href={`/proposals/${openProposalId}`} className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-border-interactive bg-surface-raised px-4 font-medium hover:bg-surface-hover">
-            View open proposal <ArrowRight aria-hidden className="size-4" />
+      <footer className="mt-auto flex flex-col gap-2 pt-1">
+        {m.openTripId ? (
+          <Link href={`/trips/${m.openTripId}`} className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover">
+            Open the group chat <ArrowRight aria-hidden className="size-4" />
           </Link>
+        ) : m.iAmInterested ? (
+          <>
+            <p className="rounded-md bg-accent-subtle px-3 py-2 text-sm text-accent-text">
+              You&apos;re interested · {m.interested} of {m.size}. The chat opens when everyone is.
+            </p>
+            <Button variant="ghost" size="sm" loading={pending} onClick={() => run(() => withdrawInterest(m.key))}>Not interested anymore</Button>
+          </>
         ) : (
           <>
             <div className="flex gap-2">
-              <Button className="flex-1" onClick={propose} loading={proposing} disabled={busy}>Propose a trip</Button>
-              <Button variant="ghost" onClick={pass} loading={passing} disabled={busy} aria-label={`Pass on ${kind === "group" ? "this group" : title}`}>Pass</Button>
+              <Button className="flex-1" loading={pending} onClick={() => run(() => expressInterest(m.key))}>
+                Interested{m.interested > 0 ? ` · ${m.interested} already are` : ""}
+              </Button>
+              <Button variant="ghost" disabled={pending} onClick={() => run(() => passMatch(m.key))}>Pass</Button>
             </div>
-            <p className="text-xs text-muted">Proposing builds a merged plan and counts as your acceptance of version 1. Pass hides this only for you.</p>
+            <p className="text-xs text-muted">When everyone taps Interested, a group chat opens and you see each other&apos;s names. Pass hides this only for you.</p>
           </>
         )}
       </footer>
@@ -125,11 +103,11 @@ export function MatchCard({ kind, score, reasons, members, targetKey, openPropos
   );
 }
 
-function Snap({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function Row({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="flex min-w-0 items-center gap-2">
-      <dt className="shrink-0 text-muted"><span aria-hidden>{icon}</span><span className="sr-only">{label}</span></dt>
-      <dd className="m-0 truncate" title={value}>{value}</dd>
+    <div className="flex min-w-0 items-start gap-2">
+      <dt className="mt-0.5 shrink-0 text-muted"><span aria-hidden>{icon}</span><span className="sr-only">{label}</span></dt>
+      <dd className="m-0 min-w-0 break-words">{value}</dd>
     </div>
   );
 }

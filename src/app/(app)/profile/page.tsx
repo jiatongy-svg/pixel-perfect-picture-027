@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
 export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ edit?: string; saved?: string }> }) {
   const { edit, saved } = await searchParams;
   const { supabase, userId, profile } = await getOnboardedViewer();
-  const urls = await photoUrls(supabase, [profile.photo_path]);
+  const [urls, { data: c }] = await Promise.all([photoUrls(supabase, [profile.photo_path]), supabase.from("contacts").select("contact").maybeSingle()]);
+  const contact = (c?.contact as string | undefined) ?? "";
   const photo = profile.photo_path ? urls[profile.photo_path] ?? null : null;
   const signOutButton = (
     <form action={signOut}>
@@ -25,7 +26,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
       <div className="mx-auto max-w-3xl">
         <PageHeader title="Edit travel profile" subtitle="What classmates see on your match card."
           action={<Link href="/profile" className="inline-flex h-9 items-center rounded-md px-3 text-sm font-medium text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-text">Cancel</Link>} />
-        <ProfileForm userId={userId} initial={profile} photoUrl={photo} />
+        <ProfileForm userId={userId} initial={profile} photoUrl={photo} contact={contact} />
       </div>
     );
   }
@@ -34,7 +35,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
       <PageHeader title="Travel profile" subtitle="What classmates see once you're matched." action={signOutButton} />
       {saved && <Notice tone="success">Profile saved.</Notice>}
-      <ProfileSummary profile={profile} photoUrl={photo} />
+      <ProfileSummary profile={profile} photoUrl={photo} contact={contact} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MIN_MATCH_SCORE } from "@/lib/constants";
 import { dateFit, planWindows, budgetFit, destinationFit } from "@/lib/feasibility";
-import { findAllPairMatches, findGroupMatches, findPairMatches, memberKey, scorePair } from "@/lib/matching";
+import { findGroupMatches, findPairMatches, findPotentialTrips, memberKey, scorePair } from "@/lib/matching";
 import { upcomingFridays, formatRange } from "@/lib/dates";
 import { person, TODAY } from "./helpers";
 
@@ -69,8 +69,8 @@ describe("hard constraints", () => {
 });
 
 describe("pair scoring", () => {
-  it("scores identical plans 100 with at least two data-backed reasons", () => {
-    const r = scorePair(person("a", "Ana"), person("b", "Ben"), TODAY);
+  it("scores identical plans 100 (when someone can drive there) with at least two data-backed reasons", () => {
+    const r = scorePair(person("a", "Ana"), person("b", "Ben", { bringing_car: true, seats_offered: 2 }), TODAY);
     expect(r.score).toBe(100);
     expect(r.reasons.length).toBeGreaterThanOrEqual(2);
     expect(r.reasons[0]).toBe("You both want Joshua Tree and overlap Nov 25–29");
@@ -81,8 +81,9 @@ describe("pair scoring", () => {
     const a = person("a", "A", { vibes: ["outdoors"] });
     const b = person("b", "B", { vibes: ["food"], budget_min: 300, budget_max: 600 });
     const r = scorePair(a, b, TODAY);
-    // dates 35 + destination 30 + budget 20 * (overlap 100 / narrowest range 250) + vibes 0
-    expect(r.score).toBe(Math.round(35 + 30 + (20 * 100) / 250));
+    // dates 45 + destination 20 + group size 15 + budget 10 * (overlap 100 / narrowest 250)
+    // + style 10 * (vibes 0 * 0.5 + same pace 1 * 0.25 + nobody can drive 0 * 0.25)
+    expect(r.score).toBe(Math.round(45 + 20 + 15 + (10 * 100) / 250 + 10 * 0.25));
   });
   it("never invents a car reason", () => {
     const r = scorePair(person("a", "A"), person("b", "B"), TODAY);
@@ -142,7 +143,8 @@ describe("group matching", () => {
   it("breaks ties by weakest pair, then ids", () => {
     const others = [person("b", "B"), person("c", "C"), person("d", "D")];
     const groups = findGroupMatches(me, others, new Set(), TODAY);
-    expect(groups.map((g) => g.key)).toEqual(["plan-a,plan-b,plan-c", "plan-a,plan-b,plan-c,plan-d", "plan-a,plan-b,plan-d", "plan-a,plan-c,plan-d"]);
+    // Same score: smaller trips first, then by key.
+    expect(groups.map((g) => g.key)).toEqual(["plan-a,plan-b,plan-c", "plan-a,plan-b,plan-d", "plan-a,plan-c,plan-d", "plan-a,plan-b,plan-c,plan-d"]);
   });
 });
 
@@ -154,8 +156,8 @@ describe("several plans per person", () => {
   it("matches each of my plans and lists each classmate plan once, against my best plan", () => {
     const mine = [withPlan("me", "Me", "m1"), withPlan("me", "Me", "m2", { break_id: "spring" })];
     const others = [withPlan("b", "Ben", "b1"), withPlan("b", "Ben", "b2", { break_id: "spring" }), withPlan("c", "Cy", "c1", { break_id: "winter" })];
-    const r = findAllPairMatches(mine, others, new Set(), TODAY);
-    expect(r.pairs.map((p) => `${p.mine.plan.id}->${p.person.plan.id}`).sort()).toEqual(["m1->b1", "m2->b2"]);
+    const r = findPotentialTrips(mine, others, new Set(), TODAY);
+    expect(r.trips.filter((t) => t.size === 2).map((t) => `${t.mine.plan.id}->${t.others[0].plan.id}`).sort()).toEqual(["m1->b1", "m2->b2"]);
   });
   it("never puts two plans of the same person in one group", () => {
     const me = withPlan("me", "Me", "m1");
@@ -164,8 +166,8 @@ describe("several plans per person", () => {
   });
   it("skips my own other plans and passed plans", () => {
     const mine = [withPlan("me", "Me", "m1"), withPlan("me", "Me", "m2")];
-    const r = findAllPairMatches(mine, [withPlan("b", "Ben", "b1"), withPlan("c", "Cy", "c1")], new Set(["c1"]), TODAY);
-    expect(r.pairs.map((p) => p.person.plan.id)).toEqual(["b1"]);
+    const r = findPotentialTrips(mine, [withPlan("b", "Ben", "b1"), withPlan("c", "Cy", "c1")], new Set(["c1"]), TODAY);
+    expect(r.trips.map((t) => t.others.map((o) => o.plan.id).join())).toEqual(["b1"]);
   });
   it("anonymous reasons never contain the classmate's name", () => {
     const me = person("a", "Ana", { destinations: ["joshua-tree"] });
@@ -173,5 +175,71 @@ describe("several plans per person", () => {
     const r = scorePair(me, them, TODAY, { anonymous: true });
     expect(r.reasons.join(" ")).not.toContain("Jamie");
     expect(scorePair(me, them, TODAY).reasons.join(" ")).toContain("Jamie Sun");
+  });
+});
+
+describe("group size, driving and date hints", () => {
+  const withProfile = (p: ReturnType<typeof person>, profile: Partial<ReturnType<typeof person>["profile"]>) => ({ ...p, profile: { ...p.profile, ...profile } });
+
+  it("a size outside my preferred range costs a real chunk of the score (80% -> about 70%)", () => {
+    const fits = scorePair(withProfile(person("a", "A"), { group_pref_long: "2" }), person("b", "B"), TODAY);
+    const misses = scorePair(withProfile(person("a", "A"), { group_pref_long: "3-4" }), person("b", "B"), TODAY);
+    expect(fits.parts.groupSize).toBe(15);
+    expect(misses.parts.groupSize).toBeCloseTo(6); // one person off: keeps 40% of 15
+    expect(fits.score - misses.score).toBe(9);
+    expect(misses.hints.join(" ")).toContain("outside your preferred group size");
+  });
+
+  it("'Any size' and a wide range get full points", () => {
+    expect(scorePair(person("a", "A"), person("b", "B"), TODAY).parts.groupSize).toBe(15);
+  });
+
+  it("Strict excludes trips outside my range; Flexible only lowers the score", () => {
+    const strict = scorePair(withProfile(person("a", "A"), { group_pref_long: "3-4", group_strict_long: true }), person("b", "B"), TODAY);
+    expect(strict.eligible).toBe(false);
+    expect(strict.blockers).toContain("groupSize");
+    const flexible = scorePair(withProfile(person("a", "A"), { group_pref_long: "3-4", group_strict_long: false }), person("b", "B"), TODAY);
+    expect(flexible.eligible).toBe(true);
+  });
+
+  it("weekend and long-trip preferences are separate", () => {
+    const me = withProfile(person("a", "A", { timing_mode: "weekends", break_id: null, weekends: ["2026-11-06"], trip_length_max: 3 }), { group_pref_weekend: "2", group_pref_long: "5-6" });
+    const them = person("b", "B", { timing_mode: "weekends", break_id: null, weekends: ["2026-11-06"], trip_length_max: 3 });
+    expect(scorePair(me, them, TODAY).parts.groupSize).toBe(15); // weekend pref "2" fits a pair
+  });
+
+  it("a plan's own group size overrides the profile default", () => {
+    const me = withProfile(person("a", "A", { group_pref: "2", group_strict: true }), { group_pref_long: "5-6", group_strict_long: true });
+    expect(scorePair(me, person("b", "B"), TODAY).eligible).toBe(true);
+  });
+
+  it("someone who can rent a car makes a drive-only trip work", () => {
+    const noDriver = scorePair(person("a", "A"), person("b", "B"), TODAY);
+    expect(noDriver.hints.join(" ")).toContain("Nobody can drive");
+    const renter = withProfile(person("b", "Ben", { willing_to_drive: true }), { has_license: true, can_rent: true });
+    const r = scorePair(person("a", "A"), renter, TODAY);
+    expect(r.score).toBeGreaterThan(noDriver.score);
+    expect(r.reasons.join(" ")).toContain("Ben can drive a rental car");
+  });
+
+  it("explains when someone would need to shift their dates (Vegas Thu–Sat vs Fri–Sun)", () => {
+    const me = person("a", "A", { destinations: ["las-vegas"], date_mode: "flex", preferred_start: "2026-11-26", preferred_end: "2026-11-28", flex_days: 1, trip_length_min: 3, trip_length_max: 3 });
+    const them = person("b", "B", { destinations: ["las-vegas"], date_mode: "flex", preferred_start: "2026-11-27", preferred_end: "2026-11-29", flex_days: 1, trip_length_min: 3, trip_length_max: 3 });
+    const r = scorePair(me, them, TODAY);
+    expect(r.eligible).toBe(true);
+    expect(r.hints.some((h) => h.includes("adjust"))).toBe(true);
+  });
+
+  it("pairs and groups come back in ONE list", () => {
+    const r = findPotentialTrips([person("a", "A")], [person("b", "B"), person("c", "C")], new Set(), TODAY);
+    expect(r.trips.map((t) => t.size).sort()).toEqual([2, 2, 3]);
+  });
+
+  it("never shows classmates' names on Match (anonymous until the chat opens)", () => {
+    const me = person("a", "Me", { date_mode: "flex", preferred_start: "2026-11-26", preferred_end: "2026-11-28", flex_days: 1, trip_length_min: 3, trip_length_max: 3 });
+    const them = person("b", "Jamie Sun", { date_mode: "flex", preferred_start: "2026-11-27", preferred_end: "2026-11-29", flex_days: 1, trip_length_min: 3, trip_length_max: 3, bringing_car: true, seats_offered: 3 });
+    const text = findPotentialTrips([me], [them], new Set(), TODAY).trips.flatMap((t) => [...t.reasons, ...t.hints]).join(" ");
+    expect(text).not.toContain("Jamie");
+    expect(text).toContain("classmate");
   });
 });

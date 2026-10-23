@@ -14,7 +14,8 @@ export function person(id: string, name: string, overrides: PlanOverrides = {}):
     id,
     name,
     msbaYear: "1st",
-    profile: { has_car: false, car_seats: 0, equipment: [], travel_experience: "some", pace: "balanced", schedule: "flexible", lodging_prefs: [], bio: "", photo_path: null, mbti: null },
+    profile: { has_car: false, car_seats: 0, equipment: [], travel_experience: "some", pace: "balanced", schedule: "flexible", lodging_prefs: [], bio: "", photo_path: null, mbti: null,
+      has_license: false, can_rent: false, vibes: [], group_pref_weekend: "any", group_strict_weekend: false, group_pref_long: "any", group_strict_long: false },
     plan: {
       id: `plan-${id}`,
       user_id: id,
@@ -35,6 +36,10 @@ export function person(id: string, name: string, overrides: PlanOverrides = {}):
       bringing_car: false,
       seats_offered: 0,
       bringing_gear: [],
+      willing_to_drive: false,
+      group_pref: null,
+      group_strict: null,
+      status: "active",
       ...plan,
     },
   };

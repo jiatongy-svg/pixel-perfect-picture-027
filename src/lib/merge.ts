@@ -189,9 +189,12 @@ function pickTransport(people: Person[], dest: Destination): MergedTrip["transpo
     const names = chosen.map((c) => `${c.name}'s car (${c.plan.seats_offered} open ${c.plan.seats_offered === 1 ? "seat" : "seats"})`);
     return { mode: "drive", text: `Drive in ${listNames(names)}. Gas split evenly.`, drivers: chosen.map((c) => c.name) };
   }
-  if (dest.access === "either") return { mode: "fly", text: "Nobody listed enough car seats, so the estimate assumes flying.", drivers: [] };
+  // No (or not enough) cars: can someone drive a rental on this trip?
+  const renter = people.find((p) => p.plan.willing_to_drive && p.profile.can_rent && !chosen.includes(p));
   const partial = chosen.length ? ` ${listNames(chosen.map((c) => c.name))}'s car fits ${seats} of ${people.length}.` : "";
-  return { mode: "rental", text: `Not enough car seats listed for this trip.${partial} The estimate includes one rental car.`, drivers: chosen.map((c) => c.name) };
+  if (renter) return { mode: "rental", text: `${renter.name} can rent and drive a car.${partial} The estimate includes one rental.`, drivers: [...chosen.map((c) => c.name), renter.name] };
+  if (dest.access === "either") return { mode: "fly", text: "Nobody listed a car or can rent one, so the estimate assumes flying.", drivers: [] };
+  return { mode: "rental", text: `Needs a driver: nobody listed a car, or said they can rent one, for this trip.${partial} The estimate assumes one rental if someone can drive.`, drivers: chosen.map((c) => c.name) };
 }
 
 function buildOutline(dest: Destination, dates: DateRange, mode: MergedTrip["transport"]["mode"]) {

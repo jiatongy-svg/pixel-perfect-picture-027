@@ -2,19 +2,22 @@
 // them, and their travel style as compact tags. Shown on /profile after saving.
 import Link from "next/link";
 import { Car, Pencil } from "lucide-react";
-import { EXPERIENCE, LODGING, PACE, SCHEDULE, equipmentLabel } from "@/lib/catalog";
+import { EXPERIENCE, LODGING, PACE, SCHEDULE, equipmentLabel, vibeLabel } from "@/lib/catalog";
+import { prefLabel } from "@/lib/groupsize";
 import type { Profile } from "@/lib/types";
 import { Avatar, Badge, Card } from "@/components/ui";
 
 const label = <T extends { id: string; label: string }>(list: readonly T[], id: string) => list.find((x) => x.id === id)?.label ?? id;
 
-export function ProfileSummary({ profile, photoUrl }: { profile: Profile; photoUrl: string | null }) {
+export function ProfileSummary({ profile, photoUrl, contact }: { profile: Profile; photoUrl: string | null; contact?: string }) {
   const style = [
     label(EXPERIENCE, profile.travel_experience),
     `${label(PACE, profile.pace)} pace`,
     label(SCHEDULE, profile.schedule),
     ...profile.lodging_prefs.map((l) => label(LODGING, l)),
+    ...(profile.vibes ?? []).map((v) => vibeLabel(v).replace(/^./, (c) => c.toUpperCase())),
   ];
+  const size = (pref: string, strict: boolean) => `${prefLabel(pref as never)}${pref !== "any" ? (strict ? " (strict)" : " (flexible)") : ""}`;
   return (
     <Card className="flex flex-col gap-4">
       <div className="flex items-center gap-4">
@@ -31,6 +34,9 @@ export function ProfileSummary({ profile, photoUrl }: { profile: Profile; photoU
       <div className="flex flex-wrap gap-1.5">
         {style.map((s) => <Badge key={s}>{s}</Badge>)}
       </div>
+      <p className="text-sm text-muted"><span className="font-medium text-text">Group size:</span> weekends {size(profile.group_pref_weekend, profile.group_strict_weekend)} · long breaks {size(profile.group_pref_long, profile.group_strict_long)}</p>
+      {(profile.has_license || profile.can_rent) && <p className="text-sm text-muted"><span className="font-medium text-text">Driving:</span> {profile.can_rent ? "Has a license and can rent a car" : "Has a driver's license"}</p>}
+      {contact && <p className="text-sm text-muted"><span className="font-medium text-text">Contact for trip-mates:</span> {contact}</p>}
       {(profile.has_car || profile.equipment.length > 0) && (
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
           <span className="font-medium text-text">Owns:</span>

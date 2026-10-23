@@ -31,7 +31,7 @@ export function ExploreCard({ item, today }: { item: ExploreItem; today: string 
           <p className="text-xs text-muted">Anonymous classmate</p>
           <h3 className="text-lg leading-snug font-semibold break-words">
             {/* The stretched link makes the whole card clickable; inner links sit above it. */}
-            <Link href={`/explore/${plan.id}`} className="rounded-sm after:absolute after:inset-0 after:content-['']">{whereText(plan)}</Link>
+            <Link href={`/discover/plan/${plan.id}`} className="rounded-sm after:absolute after:inset-0 after:content-['']">{whereText(plan)}</Link>
           </h3>
         </div>
         {status.kind === "match" && <Badge tone="highlight">{status.score}% match</Badge>}

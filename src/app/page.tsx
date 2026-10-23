@@ -7,6 +7,6 @@ export const dynamic = "force-dynamic";
 export default async function Home() {
   const { profile, plans } = await getViewer();
   if (!profile?.completed) redirect("/onboarding");
-  if (!plans.length) redirect("/plans/new");
-  redirect("/matches");
+  // No plan -> Discover (join a trip that's happening); with a plan -> Match.
+  redirect(plans.some((p) => p.status === "active") ? "/matches" : "/discover");
 }

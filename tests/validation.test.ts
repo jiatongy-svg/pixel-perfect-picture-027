@@ -52,7 +52,8 @@ describe("plan validation (server side)", () => {
 });
 
 describe("profile validation", () => {
-  const base = { display_name: "Navya", msba_year: "1st", photo_path: null, bio: "", travel_experience: "some", pace: "balanced", schedule: "flexible", lodging_prefs: [], has_car: false, car_seats: 0, equipment: [], mbti: null };
+  const base = { display_name: "Navya", msba_year: "1st", photo_path: null, bio: "", travel_experience: "some", pace: "balanced", schedule: "flexible", lodging_prefs: [], has_car: false, car_seats: 0, equipment: [], mbti: null,
+    vibes: [], has_license: false, can_rent: false, group_pref_weekend: "any", group_strict_weekend: false, group_pref_long: "any", group_strict_long: false };
   it("needs a name and a car seat count when there's a car", () => {
     expect(profileSchema.safeParse({ ...base, display_name: "  " }).success).toBe(false);
     expect(profileSchema.safeParse({ ...base, has_car: true, car_seats: 0 }).success).toBe(false);
@@ -61,6 +62,10 @@ describe("profile validation", () => {
   it("accepts a real MBTI type or none, nothing else", () => {
     expect(profileSchema.safeParse({ ...base, mbti: "ENFP" }).success).toBe(true);
     expect(profileSchema.safeParse({ ...base, mbti: "ABCD" }).success).toBe(false);
+  });
+  it("can only rent a car with a license", () => {
+    expect(profileSchema.safeParse({ ...base, can_rent: true }).success).toBe(false);
+    expect(profileSchema.safeParse({ ...base, has_license: true, can_rent: true }).success).toBe(true);
   });
   it("zeroes seats when there's no car", () => {
     const r = profileSchema.safeParse({ ...base, car_seats: 4 });

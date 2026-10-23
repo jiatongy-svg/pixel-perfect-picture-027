@@ -13,7 +13,7 @@ export type Supabase = Awaited<ReturnType<typeof createClient>>;
 
 // The plan columns classmates may see (matches the plan_cards view).
 export const PUBLIC_PLAN_COLUMNS =
-  "id, user_id, timing_mode, break_id, date_mode, preferred_start, preferred_end, flex_days, weekends, trip_length_min, trip_length_max, destinations, destination_flex, budget_min, budget_max, vibes, bringing_car, seats_offered, bringing_gear, updated_at";
+  "id, user_id, timing_mode, break_id, date_mode, preferred_start, preferred_end, flex_days, weekends, trip_length_min, trip_length_max, destinations, destination_flex, budget_min, budget_max, vibes, bringing_car, seats_offered, bringing_gear, group_pref, group_strict, willing_to_drive, status, updated_at";
 
 // ---------------------------------------------------------------------------
 // Who is signed in? Redirects away if nobody is, or if they're not on the list.
@@ -58,6 +58,13 @@ export function toPerson(profile: Profile, plan: PublicPlan): Person {
       bio: profile.bio,
       photo_path: profile.photo_path,
       mbti: profile.mbti ?? null,
+      has_license: profile.has_license ?? false,
+      can_rent: profile.can_rent ?? false,
+      vibes: profile.vibes ?? [],
+      group_pref_weekend: profile.group_pref_weekend ?? "any",
+      group_strict_weekend: profile.group_strict_weekend ?? false,
+      group_pref_long: profile.group_pref_long ?? "any",
+      group_strict_long: profile.group_strict_long ?? false,
     },
     plan: { ...plan, destinations: toPlaces(plan.destinations) },
   };
@@ -118,12 +125,17 @@ export type ProposalRow = {
   declined_by: string | null;
   created_at: string;
   updated_at: string;
+  plan_key: string;
+  published: boolean; // open on Discover
+  capacity: number | null; // max people when published
+  join_deadline: string | null;
+  trip_kind: "weekend" | "long";
 };
 export type VersionRow = {
   proposal_id: string;
   version: number;
   snapshots: Snapshot[];
-  merged: MergedTrip;
+  merged: MergedTrip & { meta?: { final?: boolean; wantMore?: boolean; extraSpots?: number; joinDeadline?: string | null } };
   note: string;
   created_by: string;
   created_at: string;

@@ -1,8 +1,11 @@
 # TripMatch
 
-TripMatch is a private travel-matching app for USC Marshall MSBA students. Each student saves a **travel profile** (who they are as a traveler) and **one current plan** (a long break or a few weekends, where, budget, vibe, and what they can bring). The app shows which classmates (or groups of 3–4) actually line up, and why. Two or more students can then turn a match into a merged trip, counter it, and confirm it once everyone accepts the same version.
+TripMatch is a private travel-matching app for USC Marshall MSBA students. Each student saves a **travel profile** (who they are as a traveler, whether they can drive, what group size they like) and one or more **plans** (a long break or a few weekends, where, budget, vibe). There are two ways in:
 
-This is a pilot for 6 real students. There's no chat, no payments, and no notifications: students check **Proposals** in the app.
+- **Match** — "I have a plan, find me people." Pairs and groups of 3–4 come back in one anonymous list, best first. When everyone taps **Interested**, a group chat opens, names appear, and the group locks in a final plan together.
+- **Discover** — "Show me what's out there." Confirmed trips with open spots (join instantly, leave any time), plus every classmate's plan, anonymous.
+
+Notifications are in-app only (the **My trips** page). There are no payments.
 
 - **Setting it up?** Follow [SETUP_CHECKLIST.md](SETUP_CHECKLIST.md).
 - **Testing with real people?** Follow [MANUAL_TEST_SCRIPT.md](MANUAL_TEST_SCRIPT.md).
@@ -34,7 +37,9 @@ Phone/laptop ──HTTPS──> Next.js on Vercel ──> Supabase (sign-in + Po
 | `src/lib/places.ts` | Places anywhere in the world: distance, labels, world city search, trip details for any city |
 | `src/lib/filters.ts` | The filter bar on Explore and Matches |
 | `src/lib/feasibility.ts` | Hard checks: dates, destination, budget (works for 2–4 people) |
-| `src/lib/matching.ts` | Pair score, group score, reasons, ranking |
+| `src/lib/matching.ts` | Trip score (pairs and groups in one list), reasons, hints, ranking |
+| `src/lib/groupsize.ts` | Group-size preferences (2 / 3–4 / 5–6 / any), strict vs flexible |
+| `src/lib/discover.ts` | Open trips on Discover: spots left, style signal, strict-size check |
 | `src/lib/merge.ts` | Rules-based merged trip, transport, gear, outline, cost estimate |
 | `src/lib/ai-merge.ts` | Optional AI polish (off by default), re-checked by the rules |
 | `src/lib/validation.ts` | Server-side input checks with friendly messages |
@@ -47,31 +52,33 @@ Phone/laptop ──HTTPS──> Next.js on Vercel ──> Supabase (sign-in + Po
 
 ## Matching, in plain English
 
-**Hard rules.** A pair is not shown if any of these fail:
+**Hard rules.** A potential trip is not shown if any of these fail:
 
-1. **Dates:** there must be at least 2 shared days (or 1, if someone only wants a 1-day trip) inside both people's free windows. Exact ("fixed") dates are never moved.
-2. **Destination:** at least one place must work for both. "Only these" means only places on the list. "Or nearby" also accepts places within 250 km of one on the list. "Anywhere" accepts everything. Two picks within 30 km count as the same place.
+1. **Dates:** at least 2 shared days (or 1, if someone only wants a 1-day trip) inside everyone's free windows. Exact ("fixed") dates are never moved.
+2. **Destination:** at least one place must work for everyone. "Only these" means only places on the list. "Or nearby" also accepts places within 250 km. "Anywhere" accepts everything. Two picks within 30 km count as the same place.
 3. **Budget:** the ranges must overlap (touching counts).
+4. **Group size (strict only):** if someone marked their group size as *Strict*, trips outside it are never shown to them. *Flexible* only lowers the score.
 
-**Score (0–100):** dates 35 + destination 30 + budget 20 + vibes 15.
+**Score (0–100):** dates 45 + destination 20 + group size 15 + budget 10 + style 10 (all in `constants.ts`).
 
-- Dates: shared days divided by the shorter of the two maximum trip lengths.
-- Destination: 100% for a place you both listed, 60% if it's "nearby" for one of you, 40% if one of you is "open".
-- Budget: the overlap divided by the narrower range.
-- Vibes: shared tags divided by all tags picked.
+- Dates: shared days divided by the shorter maximum trip length.
+- Destination: 100% for a place everyone listed, 60% if it's "nearby" for someone, 40% if someone is "open".
+- Group size: full points if the trip's size is in everyone's preferred range (2 / 3–4 / 5–6 / any), 40% if it's one step off. Each plan can override the profile's default (weekend vs long break).
+- Budget: the overlap divided by the narrowest range.
+- Style: shared vibes (half), similar pace (a quarter), and whether the trip can actually get there — a car, someone with a license who can rent, or a flight (a quarter).
 
-Matches need **40+**. The page shows the top 5, ties sorted by user id.
+Matches need **40+**. Groups of 3–4 are built from people who each fit you, and every pair inside must also score 40+. One list, sorted by score, then by the weakest pair, then smaller groups first. Hints say what someone would need to change ("shift your dates a bit"). Match never shows names.
 
-**Groups (3–4 people):** every pair must pass on its own *and* the whole group must share a date window, a destination, and a budget range. The group score is the average of all pair scores. Ties go to the stronger weakest pair, then to sorted ids. Passing on a person also hides groups that include them.
+## Trips (Match → chat → final plan)
 
-## Proposals
+1. Each person taps **Interested** on a match. When everyone has, the trip room opens with a group chat (it refreshes every few seconds) and conversation starters.
+2. One person fills in the **final plan** checklist: exact dates and place, whether to open it to more people (how many, and when sign-ups close — default 48 h before the trip). Sending it counts as their acceptance.
+3. Everyone else taps **Accept**. When everyone has accepted the same version, the trip is **confirmed**: contacts (email + optional phone/WeChat) are shared with members only, and there's an **Add to my calendar** (.ics) button.
+4. If the group wanted more people, the trip appears on **Discover → Open trips**. Classmates join the plan as it is, up to the cap and before the deadline. Strict group-size users can't see or join trips beyond their limit. Flexible members get a "the group grew — stay or leave?" notice.
+5. Anyone can **leave** at any time. If a 2-person match loses a member before it's confirmed, it ends.
+6. **No match after 24 h?** On a plan with no matches, you can end the search or tap **Still go** to post your own trip to Discover. You can also post a plan straight to Discover when you create it ("I'm going no matter what").
 
-- **Propose** saves everyone's plan snapshot and the merged trip as **version 1**. It also records the proposer's acceptance of v1; the card says so before you click.
-- **Counter** creates version N+1 with a new destination and/or dates. All earlier acceptances stop counting, including the counterer's, who must click Accept again.
-- **Accept** applies to one specific version. If the version changed in the meantime, the database refuses with "This proposal changed. Refresh to see the latest version."
-- The trip is **confirmed** only when every member has accepted the same current version.
-- **Decline** ends the proposal for everyone. **Pass** on a match hides it only for you.
-- Only one open proposal can exist per group of people, and a double-click returns the same one.
+All of this runs through locked-down database functions (`start_trip`, `submit_final_plan`, `accept_proposal`, `join_trip`, `leave_trip`, …), so the rules hold even if someone skips the screens.
 
 ## Commands
 
@@ -89,8 +96,13 @@ npm run rls-check  # security checks against the real Supabase project
 - Rate limiting relies on Supabase Auth defaults (about 1 sign-in email per address per minute, plus a low project-wide cap with the built-in email sender). There is no extra app-level rate limit on server actions. For 6 known users, this is acceptable.
 - Cost numbers are broad ranges from `constants.ts`, not live prices.
 - `superseded` exists as a proposal status but isn't used yet.
+- Chat checks for new messages every 4 seconds rather than using live updates.
+- Joining an open trip is instant (no host approval yet); the code is structured so approval can be added later.
+- The "suggested plan" in the trip room is rules-based, not AI.
 
 ## Changelog
+
+- **2026-10-22 (late night)** Match / Discover redesign. Pairs and groups in one anonymous list; new score (dates 45, destination 20, group size 15, budget 10, style 10). Profile: driver's license, "can rent a car", travel vibe, preferred group size for weekends and long breaks (strict or flexible), and an optional contact. Plans: "I'm willing to drive", per-plan group size, "going no matter what" publishing. Proposals/counters are replaced by **My trips**: mutual Interested → group chat → final-plan checklist → everyone accepts → contacts + calendar export. Discover (formerly Explore) gains **Open trips** you can join or leave. No-match plans can end the search or post their own trip. Database: `migrations/005_trips_chat_groups.sql`.
 
 - **2026-10-22 (night)** Several plans per student (up to 5, "My plans"); each plan is matched on its own and proposals are tied to specific plans (`plan_key`), so the same people can have a winter and a spring proposal. Every Explore plan is clickable (`/explore/[planId]`) and shows a score for each of your plans with a breakdown; plans that don't line up show a "% fit" instead of "% match". Fixed: Explore reasons no longer include the classmate's name. Database: `migrations/004_multiple_plans.sql`.
 

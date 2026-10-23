@@ -9,14 +9,22 @@
 // ---------------------------------------------------------------------------
 // 1. Match score weights (must add up to 100)
 // ---------------------------------------------------------------------------
-// A match score is built from four parts. Each part produces a number between
+// A match score is built from five parts. Each part produces a number between
 // 0 and 1, which is then multiplied by its weight below.
 export const WEIGHTS = {
-  dates: 35, // how many days you can actually travel together
-  destination: 30, // whether you want the same place
-  budget: 20, // how much your budget ranges overlap
-  vibes: 15, // how similar your trip vibes are (Jaccard similarity)
+  dates: 45, // how many days you can actually travel together
+  destination: 20, // whether you want the same place
+  groupSize: 15, // whether the trip's size fits everyone's preferred group size
+  budget: 10, // how much your budget ranges overlap (no overlap at all = not a match)
+  style: 10, // profile fit: vibes, pace, and whether the group can get there (car / driver)
 } as const;
+
+// How the 10 "style" points are split.
+export const STYLE_SPLIT = { vibes: 0.5, pace: 0.25, logistics: 0.25 } as const;
+
+// Group size: a trip one person outside your preferred range keeps this much
+// of the group-size points; further out keeps none. (80% -> about 70%.)
+export const GROUP_SIZE_NEAR_MISS = 0.4;
 
 // A pair (or every pair inside a group) must score at least this to be shown.
 // Raise it to show fewer, stronger matches. Lower it to show more.
@@ -53,11 +61,23 @@ export const DESTINATION_PARTIAL = {
 // ---------------------------------------------------------------------------
 // 3. Group matching
 // ---------------------------------------------------------------------------
-// Groups include the signed-in user. 3 = you + 2 classmates.
+// Suggested groups include the signed-in user. 3 = you + 2 classmates.
 export const MIN_GROUP_SIZE = 3;
-// Change to 5 or 6 later if the pilot grows. Bigger numbers mean many more
-// combinations to check, but with 6 people this is still instant.
+// Largest group the matcher suggests. Bigger groups form by joining from
+// Discover. (Raising this makes matching slower as more people join.)
 export const MAX_GROUP_SIZE = 4;
+
+// ---------------------------------------------------------------------------
+// Trips, chat and Discover
+// ---------------------------------------------------------------------------
+export const TRIPS = {
+  matchWindowHours: 24, // "no match yet" window before End / Still go
+  defaultDeadlineHoursBefore: 48, // sign-ups close this long before the trip starts
+  maxTripSize: 12,
+  maxExtraSpots: 8,
+  chatPollMs: 4000, // how often the chat checks for new messages
+  maxMessage: 1000,
+};
 
 // ---------------------------------------------------------------------------
 // 4. Plan form limits (also enforced by the database, see supabase/schema.sql)

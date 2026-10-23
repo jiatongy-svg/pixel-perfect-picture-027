@@ -21,12 +21,22 @@ export type Profile = {
   has_car: boolean;
   car_seats: number; // passenger seats (not counting the driver)
   equipment: EquipmentId[];
+  has_license: boolean; // self-reported: can drive
+  can_rent: boolean; // self-reported: can rent a car (usually 21+)
+  vibes: VibeId[]; // general travel vibes (a plan can pick its own)
+  group_pref_weekend: GroupPref; // preferred group size for weekend trips
+  group_strict_weekend: boolean; // true = never show trips outside it
+  group_pref_long: GroupPref; // ... and for long-break trips
+  group_strict_long: boolean;
   mbti: Mbti | null; // optional; shown for reference only, never part of the score
   completed: boolean;
 };
 
 export const MBTI_TYPES = ["ISTJ", "ISFJ", "INFJ", "INTJ", "ISTP", "ISFP", "INFP", "INTP", "ESTP", "ESFP", "ENFP", "ENTP", "ESTJ", "ESFJ", "ENFJ", "ENTJ"] as const;
 export type Mbti = (typeof MBTI_TYPES)[number];
+
+// Preferred group size. "3-4" fits one car; "5-6" usually needs two.
+export type GroupPref = "2" | "3-4" | "5-6" | "any";
 
 export type DateMode = "anytime" | "fixed" | "flex";
 export type DestinationFlex = "fixed" | "open_to_nearby" | "open";
@@ -54,12 +64,17 @@ export type Plan = {
   bringing_car: boolean;
   seats_offered: number;
   bringing_gear: EquipmentId[];
+  willing_to_drive: boolean; // this trip: I can drive / rent a car
+  group_pref: GroupPref | null; // null = use my profile default for this kind of trip
+  group_strict: boolean | null;
+  status: "active" | "ended"; // ended = closed after no match
+  searching_since?: string; // when the 24-hour match window started (owner only)
   notes?: string;
   updated_at?: string;
 };
 
 // The plan fields classmates are allowed to see (everything except title and notes).
-export type PublicPlan = Omit<Plan, "notes" | "title">;
+export type PublicPlan = Omit<Plan, "notes" | "title" | "searching_since">;
 
 // A student WITH ONE OF THEIR PLANS, as the matcher sees them. Someone with
 // three plans appears as three Persons (same id, different plan.id).
@@ -67,7 +82,11 @@ export type Person = {
   id: string;
   name: string;
   msbaYear: "1st" | "2nd";
-  profile: Pick<Profile, "has_car" | "car_seats" | "equipment" | "travel_experience" | "pace" | "schedule" | "lodging_prefs" | "bio" | "photo_path" | "mbti">;
+  profile: Pick<
+    Profile,
+    | "has_car" | "car_seats" | "equipment" | "travel_experience" | "pace" | "schedule" | "lodging_prefs" | "bio" | "photo_path" | "mbti"
+    | "has_license" | "can_rent" | "vibes" | "group_pref_weekend" | "group_strict_weekend" | "group_pref_long" | "group_strict_long"
+  >;
   plan: PublicPlan;
 };
 

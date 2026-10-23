@@ -94,3 +94,27 @@ it("004_multiple_plans keeps plans and open proposals, then allows more plans", 
   const r = await db.query<{ created: boolean }>("select * from public.create_proposal($1, $2, '[]'::jsonb, '{}'::jsonb)", [a, [aPlans.find((x) => !ids.includes(x)), bPlan]]);
   expect(r.rows[0].created).toBe(true);
 });
+
+it("005_trips_chat_groups applies on top of 002–004 (twice) and keeps data", async () => {
+  const db = new PGlite();
+  await db.exec(`
+    create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
+    create schema auth; create table auth.users (id uuid primary key, email text);
+    create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+    grant usage on schema public, auth to anon, authenticated, service_role;
+    alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+    alter default privileges in schema public grant all on functions to anon, authenticated, service_role;`);
+  await db.exec(read("fixtures/schema-v1.sql"));
+  for (const m of ["002_open_to_usc", "003_places_and_mbti", "004_multiple_plans"]) await db.exec(read(`../supabase/migrations/${m}.sql`));
+  const a = "00000000-0000-4000-8000-00000000000a";
+  await db.exec(`insert into auth.users values ('${a}','a@usc.edu');
+    insert into public.profiles (id, display_name, msba_year, travel_experience, pace, schedule, completed) values ('${a}','A','1st','some','balanced','flexible',true);
+    insert into public.travel_plans (user_id, timing_mode, break_id, date_mode, trip_length_min, trip_length_max, destinations, destination_flex, budget_min, budget_max)
+      values ('${a}','break','winter','anytime',2,4,'[]','open',100,900);`);
+  await db.exec(read("../supabase/migrations/005_trips_chat_groups.sql"));
+  await db.exec(read("../supabase/migrations/005_trips_chat_groups.sql")); // safe twice
+  const plan = (await db.query<{ status: string; group_pref: string | null }>("select status, group_pref from public.travel_plans")).rows[0];
+  expect(plan).toEqual({ status: "active", group_pref: null });
+  const prof = (await db.query<{ group_pref_long: string; has_license: boolean }>("select group_pref_long, has_license from public.profiles")).rows[0];
+  expect(prof).toEqual({ group_pref_long: "any", has_license: false });
+});

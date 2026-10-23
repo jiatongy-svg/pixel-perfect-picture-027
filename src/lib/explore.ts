@@ -6,7 +6,8 @@ export const WHY: Record<Blocker, string> = {
   dates: "your dates don't overlap.",
   destination: "none of your destinations work for it.",
   budget: "your budgets don't overlap.",
-  score: "it only partly lines up with your plan.",
+  groupSize: "the group size is outside someone's strict limit.",
+  score: "it only partly lines up with your plan."
 };
 
 // Each of my plans vs. theirs (anonymous wording), best first: plans that line

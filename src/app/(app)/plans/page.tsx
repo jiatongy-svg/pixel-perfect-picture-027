@@ -9,7 +9,8 @@ import { PLAN_LIMITS } from "@/lib/constants";
 import { todayLA } from "@/lib/dates";
 import { budgetText, whenText, whereText } from "@/lib/describe";
 import { getOnboardedViewer, planName } from "@/lib/data";
-import { EmptyState, Notice, PageHeader } from "@/components/ui";
+import { ReopenPlanButton } from "@/components/TripButtons";
+import { Badge, EmptyState, Notice, PageHeader } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -38,15 +39,16 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
       ) : (
         <ul className="flex flex-col gap-3">
           {plans.map((p) => (
-            <li key={p.id}>
+            <li key={p.id} className="flex flex-col gap-2">
               <Link href={`/plans/${p.id}`} className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-surface-raised p-4 shadow-sm transition-colors duration-150 hover:bg-surface-hover active:bg-surface-active">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold" title={planName(p)}>{planName(p)}</p>
+                  <p className="flex min-w-0 items-center gap-2 font-semibold"><span className="truncate" title={planName(p)}>{planName(p)}</span>{p.status === "ended" && <Badge>Closed</Badge>}</p>
                   <p className="truncate text-sm text-muted">{whereText(p)}</p>
                   <p className="text-sm text-muted">{whenText(p, today)} · {budgetText(p)}{p.vibes.length ? ` · ${p.vibes.map(vibeLabel).join(", ")}` : ""}</p>
                 </div>
                 <ChevronRight aria-hidden className="size-5 shrink-0 text-muted" />
               </Link>
+              {p.status === "ended" && <div className="pl-1"><ReopenPlanButton planId={p.id} /></div>}
             </li>
           ))}
         </ul>
