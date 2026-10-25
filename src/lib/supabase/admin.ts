@@ -12,6 +12,6 @@ import { publicEnv } from "@/lib/env";
 
 export function createAdminClient() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!key) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY (server-only). See SETUP_CHECKLIST.md.");
+  if (!key) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY (server-only). See docs/SETUP_CHECKLIST.md.");
   return createClient(publicEnv.supabaseUrl(), key, { auth: { persistSession: false, autoRefreshToken: false } });
 }

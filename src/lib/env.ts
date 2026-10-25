@@ -8,7 +8,7 @@
 
 function required(name: string, value: string | undefined): string {
   if (!value) {
-    throw new Error(`Missing environment variable ${name}. See .env.example and SETUP_CHECKLIST.md.`);
+    throw new Error(`Missing environment variable ${name}. See .env.example and docs/SETUP_CHECKLIST.md.`);
   }
   return value;
 }
