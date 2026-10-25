@@ -8,6 +8,7 @@
 
 ![How TripMatch works: match, chat, go](docs/images/how-it-works.png)
 
+
 ---
 
 ## The problem
