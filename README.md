@@ -25,7 +25,7 @@ The gap isn't people. It's **visibility into whose plans almost overlap.**
 | | |
 |---|---|
 | **Post a plan** | Dates (a break or a few weekends), places, budget, vibe, group size. Up to 5 plans per student. |
-| **Match** | Pairs and groups of 3–4, ranked by a 0–100 score, each with the reasons it fits. Anonymous until everyone is interested. |
+| **Match** | Pair and group MSBA students , ranked by a 0–100 score, each with the reasons it fits. Anonymous until everyone is interested. |
 | **Chat** | When everyone taps *Interested*, a group chat opens — talk before anyone commits. |
 | **Lock the trip** | One member sends the final plan (dates, place, cost split); everyone accepts. Contacts and a calendar file unlock. |
 | **Discover** | Confirmed trips can post open seats. Classmates without a plan can join instantly — and leave any time. |
