@@ -4,7 +4,7 @@
 
 🏆 **Grand Champion (1st Place) — 7th Annual AI Global Business Analytics Case Competition, USC Marshall School of Business (October 2026)**
 
-[**Live app**](https://tripmatch-msba.vercel.app) (USC sign-in) · [Developer guide](docs/DEVELOPMENT.md) · [Setup](docs/SETUP_CHECKLIST.md)
+[**Live app**](https://tripmatch-msba.vercel.app) (USC sign-in) · [🎬 **Demo video**](https://github.com/jiatongy-svg/tripmatch/releases/download/v1.0/TripMatch-Demo.mp4) · [📊 **Pitch deck**](https://github.com/jiatongy-svg/tripmatch/releases/download/v1.0/TripMatch-Pitch-Deck.pdf) · [Developer guide](docs/DEVELOPMENT.md)
 
 ![How TripMatch works: match, chat, go](docs/images/how-it-works.png)
 
