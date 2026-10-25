@@ -2,7 +2,7 @@
 
 **Find classmates whose travel plans almost match yours — then turn them into one trip everyone accepts.**
 
-🏆 **1st Place — 7th Annual AI Global Business Analytics Case Competition, USC Marshall School of Business (October 2026)**
+🏆 **Grand Champion (1st Place) — 7th Annual AI Global Business Analytics Case Competition, USC Marshall School of Business (October 2026)**
 
 [**Live app**](https://tripmatch-msba.vercel.app) (USC sign-in) · [Developer guide](docs/DEVELOPMENT.md) · [Setup](docs/SETUP_CHECKLIST.md)
 
@@ -67,12 +67,12 @@ Phone / laptop ──HTTPS──▶ Next.js on Vercel ──▶ Supabase (Postgr
 
 USC Marshall MS in Business Analytics
 
-- Navya Gupta
-- Thomas (Jiatong) Yin — [@jiatongy-svg](https://github.com/jiatongy-svg)
-- Hazel Yang
-- Violet Qian
-- Chaeyeon Sun
-- Steven Eum
+- Navya Gupta — [@navyagup014](https://github.com/navyagup014)
+- Thomas Yin — [@jiatongy-svg](https://github.com/jiatongy-svg)
+- Hazel Yang — [@HazelYang0105](https://github.com/HazelYang0105)
+- Violet Qian — [@ruiyiqian](https://github.com/ruiyiqian)
+- Jamie Sun — [@jamiechaesun](https://github.com/jamiechaesun)
+- Steven Eum — [@Syeum1](https://github.com/Syeum1)
 
 ## Run it yourself
 
